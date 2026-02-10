@@ -1,0 +1,108 @@
+import * as React from "react";
+import "./App.css";
+import { AdminDashboard } from "./components/component/adminDashboard";
+import { ClientChat } from "./components/component/clientChat";
+import { ChevronLeft, ChevronRight, MessageSquare } from "lucide-react";
+import { Button } from "./components/ui/button";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "./components/ui/tooltip";
+
+type SelectedMessageInfo = {
+  traceId: string;
+  messageId?: string;
+  role: "user" | "assistant";
+};
+
+export default function AdminParent(): React.JSX.Element {
+  const [selectedInfo, setSelectedInfo] =
+    React.useState<SelectedMessageInfo | null>(null);
+  const [syncScroll, setSyncScroll] = React.useState<boolean>(false);
+  const [triggerLiveScroll, setTriggerLiveScroll] = React.useState<number>(0);
+  const [autoMode, setAutoMode] = React.useState<boolean>(false);
+  const [showClientChat, setShowClientChat] = React.useState<boolean>(true);
+
+  const handleClientScroll = React.useCallback(() => {
+    if (syncScroll) {
+      setTriggerLiveScroll((prev) => prev + 1);
+    }
+  }, [syncScroll]);
+
+  return (
+    <div className="min-h-screen bg-background flex w-full">
+      {/* 左侧：Admin Dashboard */}
+      <div className="flex-1 border-r border-border">
+        <AdminDashboard
+          externalSelectedInfo={selectedInfo}
+          syncScroll={syncScroll}
+          onSyncScrollChange={setSyncScroll}
+          triggerLiveScroll={triggerLiveScroll}
+          autoMode={autoMode}
+          onAutoModeChange={setAutoMode}
+        />
+      </div>
+
+      {/* 中间：折叠按钮 */}
+      <div className="relative flex items-center">
+        <TooltipProvider>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setShowClientChat(!showClientChat)}
+                className="absolute left-0 top-1/2 -translate-y-1/2 -translate-x-1/2 z-10 h-12 w-6 rounded-full border bg-background shadow-md hover:bg-accent p-0"
+              >
+                {showClientChat ? (
+                  <ChevronRight className="h-4 w-4" />
+                ) : (
+                  <ChevronLeft className="h-4 w-4" />
+                )}
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="left">
+              {showClientChat ? "Hide Client Chat" : "Show Client Chat"}
+            </TooltipContent>
+          </Tooltip>
+        </TooltipProvider>
+      </div>
+
+      {/* 右侧：Client Chat */}
+      <div
+        className={`flex-shrink-0 transition-all duration-300 ease-in-out overflow-hidden ${
+          showClientChat ? "w-[30%]" : "w-0"
+        }`}
+      >
+        <div className="w-full h-full min-w-[300px]">
+          <ClientChat
+            onMessageSelect={setSelectedInfo}
+            syncScroll={syncScroll}
+            autoMode={autoMode}
+          />
+        </div>
+      </div>
+
+      {/* 收起时显示的小图标提示 */}
+      {/* {!showClientChat && (
+        <TooltipProvider>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setShowClientChat(true)}
+                className="fixed right-4 top-4 z-20"
+              >
+                <MessageSquare className="h-5 w-5" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="left">Open Client Chat</TooltipContent>
+          </Tooltip>
+        </TooltipProvider>
+      )} */}
+    </div>
+  );
+}

@@ -1,0 +1,54 @@
+version: "3.9"
+
+services:
+  # ── MongoDB ──────────────────────────────────────────
+  mongo:
+    image: mongo:7
+    restart: unless-stopped
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo_data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ── FastAPI Backend ──────────────────────────────────
+  api:
+    build:
+      context: ./services/api
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    depends_on:
+      mongo:
+        condition: service_healthy
+    env_file:
+      - .env
+    environment:
+      - MONGODB_URI=mongodb://mongo:27017
+      - MONGODB_DB=orch
+      - MONGODB_PROV_COLLECTION=prov_events
+      - API_HOST=0.0.0.0
+      - API_PORT=8000
+    # If you need the MCP server inside the container,
+    # mount its directory and set MCP_SERVER_SCRIPT / BACKEND_PYTHON.
+    # volumes:
+    #   - /path/to/Medical/medical-calculator-backend:/mcp-server:ro
+
+  # ── React Frontend (nginx) ──────────────────────────
+  web-admin:
+    build:
+      context: ./apps/web-admin
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    ports:
+      - "5173:80"
+    depends_on:
+      - api
+
+volumes:
+  mongo_data:
