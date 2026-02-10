@@ -1,6 +1,4 @@
-"use client";
-
-import React, { useState } from "react";
+import { useState } from "react";
 
 export interface LineData {
   label: string;
@@ -53,8 +51,9 @@ export default function SvgLineChart({
 
   // Y-axis gridlines
   const yTicks = 5;
-  const yTickValues = Array.from({ length: yTicks }, (_, i) =>
-    yMin + ((yMax - yMin) / (yTicks - 1)) * i,
+  const yTickValues = Array.from(
+    { length: yTicks },
+    (_, i) => yMin + ((yMax - yMin) / (yTicks - 1)) * i,
   );
 
   return (
@@ -207,7 +206,10 @@ export default function SvgLineChart({
       {/* Legend */}
       <div className="flex items-center justify-center gap-4 mt-2">
         {lines.map((line, i) => (
-          <div key={i} className="flex items-center gap-1.5 text-xs text-gray-600">
+          <div
+            key={i}
+            className="flex items-center gap-1.5 text-xs text-gray-600"
+          >
             <div
               className="w-3 h-0.5 rounded"
               style={{ backgroundColor: line.color }}

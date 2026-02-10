@@ -17,7 +17,6 @@ import {
   Server,
   Brain,
   Database,
-  ShieldCheck,
   Wrench,
   ChevronDown,
   ChevronRight,
@@ -29,8 +28,8 @@ import {
   Eye,
   EyeOff,
   Save,
-  HelpCircle, // 新增
-  Sparkles, // 新增
+  HelpCircle,
+  Sparkles,
   Globe,
   Zap,
   FileCode,
@@ -59,9 +58,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-
-// ============ Types ============
 
 interface ModuleMeta {
   version?: string;
@@ -84,7 +80,7 @@ interface RegistryModule {
   enabled: boolean;
   meta?: ModuleMeta;
   error_message?: string;
-  explanation?: string; // 新增
+  explanation?: string;
 }
 
 interface RegistryCategory {
@@ -103,7 +99,7 @@ interface MCPToolInfo {
   input_schema?: Record<string, unknown>;
   server_id: string;
   server_name: string;
-  explanation?: string; // 新增
+  explanation?: string;
 }
 
 interface MCPServerWithTools {
@@ -115,7 +111,7 @@ interface MCPServerWithTools {
   tools: MCPToolInfo[];
   tool_count: number;
   error_message?: string;
-  explanation?: string; // 新增
+  explanation?: string;
 }
 
 interface MCPCategory {
@@ -167,28 +163,6 @@ interface TestResult {
   latency_ms?: number;
 }
 
-// Policy Types
-interface PolicyRule {
-  id: string;
-  name: string;
-  description?: string;
-  content: string;
-  severity: "block" | "warn" | "info";
-  enabled: boolean;
-}
-
-interface Policy {
-  id: string;
-  name: string;
-  description?: string;
-  type: "system" | "input" | "output";
-  status: "active" | "inactive" | "draft";
-  rules: PolicyRule[];
-  created_at: number;
-  updated_at: number;
-  version: string;
-}
-
 interface RegisteredEngine {
   id: string;
   name: string;
@@ -204,17 +178,6 @@ interface RegisteredEngine {
   updated_at: number;
 }
 
-interface PolicyStatus {
-  total_policies: number;
-  active_policies: number;
-  input: { policies: number; rules: number };
-  output: { policies: number; rules: number };
-  system: { policies: number; rules: number };
-  engine_status: string;
-}
-
-// ============ Constants ============
-
 const CATEGORY_ICONS: Record<string, React.ReactNode> = {
   infrastructure: <Server className="h-5 w-5" />,
   extensions: <Wrench className="h-5 w-5" />,
@@ -229,8 +192,6 @@ const STATUS_COLORS: Record<string, string> = {
   degraded: "bg-yellow-500/10 text-yellow-400 border-yellow-500/30",
   unknown: "bg-gray-500/10 text-gray-400 border-gray-500/30",
 };
-
-// ============ LLM Config Dialog ============
 
 function LLMConfigDialog({
   open,
@@ -250,12 +211,10 @@ function LLMConfigDialog({
   const [testResult, setTestResult] = React.useState<TestResult | null>(null);
   const [showApiKey, setShowApiKey] = React.useState(false);
 
-  // Form state
   const [apiKey, setApiKey] = React.useState("");
   const [model, setModel] = React.useState("");
   const [maxTokens, setMaxTokens] = React.useState(1200);
 
-  // Load config when dialog opens
   React.useEffect(() => {
     if (open) {
       setLoading(true);
@@ -277,7 +236,6 @@ function LLMConfigDialog({
     setTesting(true);
     setTestResult(null);
     try {
-      // First update if there are changes
       if (apiKey || model !== config?.model) {
         await fetch(`${apiBase}/api/config/llm`, {
           method: "PUT",
@@ -609,12 +567,10 @@ function DatabaseConfigDialog({
   const [testResult, setTestResult] = React.useState<TestResult | null>(null);
   const [showUri, setShowUri] = React.useState(false);
 
-  // Form state
   const [uri, setUri] = React.useState("");
   const [database, setDatabase] = React.useState("");
   const [collection, setCollection] = React.useState("");
 
-  // Load config when dialog opens
   React.useEffect(() => {
     if (open) {
       setLoading(true);
@@ -636,7 +592,6 @@ function DatabaseConfigDialog({
     setTesting(true);
     setTestResult(null);
     try {
-      // First update if there are changes
       const updates: Record<string, string> = {};
       if (uri) updates.uri = uri;
       if (database !== config?.database) updates.database = database;
@@ -837,580 +792,6 @@ function DatabaseConfigDialog({
   );
 }
 
-// ============ Policy Section Component ============
-
-import { Textarea } from "@/components/ui/textarea";
-import { Upload, Shield, AlertTriangle, Info, Ban } from "lucide-react";
-
-const SEVERITY_CONFIG = {
-  block: { icon: Ban, color: "text-red-400", bg: "bg-red-500/10" },
-  warn: {
-    icon: AlertTriangle,
-    color: "text-yellow-400",
-    bg: "bg-yellow-500/10",
-  },
-  info: { icon: Info, color: "text-blue-400", bg: "bg-blue-500/10" },
-  // 添加模拟数据使用的严重级别
-  critical: { icon: Ban, color: "text-red-500", bg: "bg-red-500/10" },
-  high: {
-    icon: AlertTriangle,
-    color: "text-orange-500",
-    bg: "bg-orange-500/10",
-  },
-  medium: {
-    icon: AlertTriangle,
-    color: "text-yellow-400",
-    bg: "bg-yellow-500/10",
-  },
-  low: { icon: Info, color: "text-blue-400", bg: "bg-blue-500/10" },
-};
-
-const POLICY_TYPE_CONFIG = {
-  input: {
-    label: "Input Policy",
-    color: "bg-purple-500/10 text-purple-400",
-    description: "Reviews user messages before processing",
-  },
-  output: {
-    label: "Output Policy",
-    color: "bg-orange-500/10 text-orange-400",
-    description: "Reviews AI responses before delivery",
-  },
-  system: {
-    label: "System Policy",
-    color: "bg-cyan-500/10 text-cyan-400",
-    description: "System-level operational rules",
-  },
-};
-
-function PolicySection({
-  apiBase,
-}: {
-  apiBase: string;
-  onRefresh?: () => void;
-}) {
-  const [policies, setPolicies] = React.useState<Policy[]>([]);
-  const [status, setStatus] = React.useState<PolicyStatus | null>(null);
-  const [_loading, setLoading] = React.useState(false);
-  const [expandedPolicies, setExpandedPolicies] = React.useState<Set<string>>(
-    new Set(),
-  );
-  const [isAddPolicyOpen, setIsAddPolicyOpen] = React.useState(false);
-  const [_editingPolicy, _setEditingPolicy] = React.useState<Policy | null>(
-    null,
-  );
-  const [policyToDelete, setPolicyToDelete] = React.useState<Policy | null>(
-    null,
-  );
-  void _loading;
-  void _editingPolicy;
-  void _setEditingPolicy; // Suppress unused warnings
-
-  // New policy form
-  const [newPolicy, setNewPolicy] = React.useState({
-    name: "",
-    description: "",
-    type: "input" as "input" | "output" | "system",
-    rules: [] as PolicyRule[],
-  });
-  const [newRuleContent, setNewRuleContent] = React.useState("");
-  const [newRuleName, setNewRuleName] = React.useState("");
-  const [newRuleSeverity, setNewRuleSeverity] = React.useState<
-    "block" | "warn" | "info"
-  >("block");
-
-  const fetchPolicies = React.useCallback(async () => {
-    setLoading(true);
-    try {
-      const [policiesRes, statusRes] = await Promise.all([
-        fetch(`${apiBase}/api/policies`),
-        fetch(`${apiBase}/api/policies/status`),
-      ]);
-      if (policiesRes.ok) {
-        const data = await policiesRes.json();
-        setPolicies(data.policies || []);
-      }
-      if (statusRes.ok) {
-        setStatus(await statusRes.json());
-      }
-    } catch (e) {
-      console.error("Failed to fetch policies:", e);
-    } finally {
-      setLoading(false);
-    }
-  }, [apiBase]);
-
-  React.useEffect(() => {
-    void fetchPolicies();
-  }, [fetchPolicies]);
-
-  const togglePolicyExpanded = (policyId: string) => {
-    setExpandedPolicies((prev) => {
-      const next = new Set(prev);
-      next.has(policyId) ? next.delete(policyId) : next.add(policyId);
-      return next;
-    });
-  };
-
-  const handleToggleRule = async (
-    policyId: string,
-    ruleId: string,
-    enabled: boolean,
-  ) => {
-    try {
-      await fetch(
-        `${apiBase}/api/policies/${policyId}/rules/${ruleId}/toggle?enabled=${enabled}`,
-        {
-          method: "PATCH",
-        },
-      );
-      await fetchPolicies();
-    } catch (e) {
-      console.error("Failed to toggle rule:", e);
-    }
-  };
-
-  const handleDeletePolicy = async (policyId: string) => {
-    try {
-      await fetch(`${apiBase}/api/policies/${policyId}`, { method: "DELETE" });
-      await fetchPolicies();
-      setPolicyToDelete(null);
-    } catch (e) {
-      console.error("Failed to delete policy:", e);
-    }
-  };
-
-  const handleAddRule = () => {
-    if (!newRuleName.trim() || !newRuleContent.trim()) return;
-    const rule: PolicyRule = {
-      id: `rule-${Date.now()}`,
-      name: newRuleName,
-      content: newRuleContent,
-      severity: newRuleSeverity,
-      enabled: true,
-    };
-    setNewPolicy((prev) => ({ ...prev, rules: [...prev.rules, rule] }));
-    setNewRuleName("");
-    setNewRuleContent("");
-  };
-
-  const handleRemoveRule = (ruleId: string) => {
-    setNewPolicy((prev) => ({
-      ...prev,
-      rules: prev.rules.filter((r) => r.id !== ruleId),
-    }));
-  };
-
-  const handleCreatePolicy = async () => {
-    try {
-      await fetch(`${apiBase}/api/policies`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(newPolicy),
-      });
-      await fetchPolicies();
-      setIsAddPolicyOpen(false);
-      setNewPolicy({ name: "", description: "", type: "input", rules: [] });
-    } catch (e) {
-      console.error("Failed to create policy:", e);
-    }
-  };
-
-  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
-    const formData = new FormData();
-    formData.append("file", file);
-
-    try {
-      const res = await fetch(`${apiBase}/api/policies/upload`, {
-        method: "POST",
-        body: formData,
-      });
-      if (res.ok) {
-        await fetchPolicies();
-      }
-    } catch (e) {
-      console.error("Failed to upload policy:", e);
-    }
-    e.target.value = "";
-  };
-
-  return (
-    <div className="space-y-4">
-      {/* Policy Stats */}
-      {status && (
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
-          <div className="p-3 rounded-lg bg-muted/50">
-            <div className="text-xl font-bold">{status.total_policies}</div>
-            <div className="text-xs text-muted-foreground">Total Policies</div>
-          </div>
-          <div className="p-3 rounded-lg bg-purple-500/10">
-            <div className="text-xl font-bold text-purple-400">
-              {status.input.rules}
-            </div>
-            <div className="text-xs text-muted-foreground">Input Rules</div>
-          </div>
-          <div className="p-3 rounded-lg bg-orange-500/10">
-            <div className="text-xl font-bold text-orange-400">
-              {status.output.rules}
-            </div>
-            <div className="text-xs text-muted-foreground">Output Rules</div>
-          </div>
-          <div className="p-3 rounded-lg bg-cyan-500/10">
-            <div className="text-xl font-bold text-cyan-400">
-              {status.system.rules}
-            </div>
-            <div className="text-xs text-muted-foreground">System Rules</div>
-          </div>
-        </div>
-      )}
-
-      {/* Actions */}
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <Shield className="h-5 w-5" />
-          <h3 className="font-semibold">Policy Engine</h3>
-          <Badge variant="outline" className="bg-green-500/10 text-green-400">
-            {status?.engine_status || "running"}
-          </Badge>
-        </div>
-        <div className="flex gap-2">
-          <Button variant="outline" size="sm" asChild>
-            <label className="cursor-pointer">
-              <Upload className="h-4 w-4 mr-1" />
-              Upload
-              <input
-                type="file"
-                accept=".json"
-                className="hidden"
-                onChange={handleFileUpload}
-              />
-            </label>
-          </Button>
-          <Button size="sm" onClick={() => setIsAddPolicyOpen(true)}>
-            <Plus className="h-4 w-4 mr-1" />
-            Add Policy
-          </Button>
-        </div>
-      </div>
-
-      {/* Policy List */}
-      {policies.length === 0 ? (
-        <Card>
-          <CardContent className="flex flex-col items-center justify-center py-8">
-            <Shield className="h-10 w-10 text-muted-foreground mb-3" />
-            <p className="font-medium mb-1">No policies configured</p>
-            <p className="text-sm text-muted-foreground">
-              Add policies to control content review
-            </p>
-          </CardContent>
-        </Card>
-      ) : (
-        <div className="space-y-2">
-          {policies.map((policy) => {
-            const isExpanded = expandedPolicies.has(policy.id);
-            const typeConfig = POLICY_TYPE_CONFIG[policy.type];
-            const enabledRules = policy.rules.filter((r) => r.enabled).length;
-            const isDefault = policy.id.startsWith("default-");
-
-            return (
-              <Card key={policy.id}>
-                <Collapsible
-                  open={isExpanded}
-                  onOpenChange={() => togglePolicyExpanded(policy.id)}
-                >
-                  <CollapsibleTrigger asChild>
-                    <CardHeader className="cursor-pointer hover:bg-muted/50 transition-colors py-3">
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-3">
-                          {isExpanded ? (
-                            <ChevronDown className="h-4 w-4" />
-                          ) : (
-                            <ChevronRight className="h-4 w-4" />
-                          )}
-                          <div>
-                            <div className="flex items-center gap-2">
-                              <span className="font-medium">{policy.name}</span>
-                              <Badge
-                                variant="outline"
-                                className={typeConfig.color}
-                              >
-                                {typeConfig.label}
-                              </Badge>
-                              <Badge
-                                variant="outline"
-                                className={
-                                  policy.status === "active"
-                                    ? "bg-green-500/10 text-green-400"
-                                    : "bg-gray-500/10"
-                                }
-                              >
-                                {policy.status}
-                              </Badge>
-                              {isDefault && (
-                                <Badge variant="outline">Default</Badge>
-                              )}
-                            </div>
-                            {policy.description && (
-                              <p className="text-xs text-muted-foreground mt-0.5">
-                                {policy.description}
-                              </p>
-                            )}
-                          </div>
-                        </div>
-                        <div
-                          className="flex items-center gap-2"
-                          onClick={(e) => e.stopPropagation()}
-                        >
-                          <span className="text-xs text-muted-foreground">
-                            {enabledRules}/{policy.rules.length} rules
-                          </span>
-                          {!isDefault && (
-                            <Button
-                              variant="destructive"
-                              size="sm"
-                              onClick={() => setPolicyToDelete(policy)}
-                            >
-                              <Trash2 className="h-3.5 w-3.5" />
-                            </Button>
-                          )}
-                        </div>
-                      </div>
-                    </CardHeader>
-                  </CollapsibleTrigger>
-                  <CollapsibleContent>
-                    <CardContent className="pt-0">
-                      {policy.rules.length === 0 ? (
-                        <p className="text-sm text-muted-foreground py-3 text-center">
-                          No rules defined
-                        </p>
-                      ) : (
-                        <div className="space-y-2">
-                          {policy.rules.map((rule) => {
-                            const severityConfig =
-                              SEVERITY_CONFIG[rule.severity];
-                            const SeverityIcon = severityConfig.icon;
-                            return (
-                              <div
-                                key={rule.id}
-                                className={`p-3 rounded-lg ${severityConfig.bg} border border-transparent hover:border-muted`}
-                              >
-                                <div className="flex items-start justify-between">
-                                  <div className="flex-1">
-                                    <div className="flex items-center gap-2">
-                                      <SeverityIcon
-                                        className={`h-4 w-4 ${severityConfig.color}`}
-                                      />
-                                      <span className="font-medium text-sm">
-                                        {rule.name}
-                                      </span>
-                                      <Badge
-                                        variant="outline"
-                                        className="text-xs"
-                                      >
-                                        {rule.severity}
-                                      </Badge>
-                                    </div>
-                                    <p className="text-xs text-muted-foreground mt-1">
-                                      {rule.content}
-                                    </p>
-                                  </div>
-                                  <Switch
-                                    checked={rule.enabled}
-                                    onCheckedChange={(checked) =>
-                                      handleToggleRule(
-                                        policy.id,
-                                        rule.id,
-                                        checked,
-                                      )
-                                    }
-                                  />
-                                </div>
-                              </div>
-                            );
-                          })}
-                        </div>
-                      )}
-                    </CardContent>
-                  </CollapsibleContent>
-                </Collapsible>
-              </Card>
-            );
-          })}
-        </div>
-      )}
-
-      {/* Add Policy Dialog */}
-      <Dialog open={isAddPolicyOpen} onOpenChange={setIsAddPolicyOpen}>
-        <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle>Create New Policy</DialogTitle>
-            <DialogDescription>
-              Define rules for content review
-            </DialogDescription>
-          </DialogHeader>
-          <div className="space-y-4 py-4">
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label>Policy Name</Label>
-                <Input
-                  placeholder="e.g., Content Safety Policy"
-                  value={newPolicy.name}
-                  onChange={(e) =>
-                    setNewPolicy({ ...newPolicy, name: e.target.value })
-                  }
-                />
-              </div>
-              <div className="space-y-2">
-                <Label>Type</Label>
-                <Select
-                  value={newPolicy.type}
-                  onValueChange={(v: "input" | "output" | "system") =>
-                    setNewPolicy({ ...newPolicy, type: v })
-                  }
-                >
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="input">Input (User Messages)</SelectItem>
-                    <SelectItem value="output">
-                      Output (AI Responses)
-                    </SelectItem>
-                    <SelectItem value="system">System (Operations)</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
-            <div className="space-y-2">
-              <Label>Description</Label>
-              <Input
-                placeholder="Brief description of this policy"
-                value={newPolicy.description}
-                onChange={(e) =>
-                  setNewPolicy({ ...newPolicy, description: e.target.value })
-                }
-              />
-            </div>
-
-            {/* Rules */}
-            <div className="space-y-3">
-              <Label>Rules ({newPolicy.rules.length})</Label>
-              {newPolicy.rules.map((rule) => (
-                <div
-                  key={rule.id}
-                  className="p-2 rounded bg-muted/50 flex items-start justify-between"
-                >
-                  <div className="flex-1">
-                    <div className="flex items-center gap-2">
-                      <span className="font-medium text-sm">{rule.name}</span>
-                      <Badge variant="outline" className="text-xs">
-                        {rule.severity}
-                      </Badge>
-                    </div>
-                    <p className="text-xs text-muted-foreground">
-                      {rule.content}
-                    </p>
-                  </div>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => handleRemoveRule(rule.id)}
-                  >
-                    <Trash2 className="h-3.5 w-3.5" />
-                  </Button>
-                </div>
-              ))}
-
-              {/* Add Rule Form */}
-              <div className="p-3 rounded border border-dashed space-y-2">
-                <div className="grid grid-cols-2 gap-2">
-                  <Input
-                    placeholder="Rule name"
-                    value={newRuleName}
-                    onChange={(e) => setNewRuleName(e.target.value)}
-                  />
-                  <Select
-                    value={newRuleSeverity}
-                    onValueChange={(v: "block" | "warn" | "info") =>
-                      setNewRuleSeverity(v)
-                    }
-                  >
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="block">Block</SelectItem>
-                      <SelectItem value="warn">Warn</SelectItem>
-                      <SelectItem value="info">Info</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-                <Textarea
-                  placeholder="Rule content - describe what this rule checks for..."
-                  value={newRuleContent}
-                  onChange={(e) => setNewRuleContent(e.target.value)}
-                  rows={2}
-                />
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={handleAddRule}
-                  disabled={!newRuleName || !newRuleContent}
-                >
-                  <Plus className="h-3.5 w-3.5 mr-1" /> Add Rule
-                </Button>
-              </div>
-            </div>
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setIsAddPolicyOpen(false)}>
-              Cancel
-            </Button>
-            <Button
-              onClick={handleCreatePolicy}
-              disabled={!newPolicy.name || newPolicy.rules.length === 0}
-            >
-              Create Policy
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* Delete Confirmation */}
-      <Dialog
-        open={!!policyToDelete}
-        onOpenChange={() => setPolicyToDelete(null)}
-      >
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Delete Policy</DialogTitle>
-            <DialogDescription>
-              Are you sure you want to delete "{policyToDelete?.name}"? This
-              action cannot be undone.
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setPolicyToDelete(null)}>
-              Cancel
-            </Button>
-            <Button
-              variant="destructive"
-              onClick={() =>
-                policyToDelete && handleDeletePolicy(policyToDelete.id)
-              }
-            >
-              Delete
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-    </div>
-  );
-}
-
 // ============ Main Component ============
 
 export function RegisterListTab({ apiBase }: { apiBase: string }) {
@@ -1421,7 +802,6 @@ export function RegisterListTab({ apiBase }: { apiBase: string }) {
     new Set(),
   );
 
-  // Dialog states
   const [isAddMCPDialogOpen, setIsAddMCPDialogOpen] = React.useState(false);
   const [isLLMConfigOpen, setIsLLMConfigOpen] = React.useState(false);
   const [isDatabaseConfigOpen, setIsDatabaseConfigOpen] = React.useState(false);
@@ -1449,7 +829,6 @@ export function RegisterListTab({ apiBase }: { apiBase: string }) {
   const [serverToDelete, setServerToDelete] =
     React.useState<MCPServerWithTools | null>(null);
 
-  // Fetch registry data
   const fetchRegistry = React.useCallback(async () => {
     setLoading(true);
     try {
@@ -1457,7 +836,6 @@ export function RegisterListTab({ apiBase }: { apiBase: string }) {
       if (response.ok) {
         const data = await response.json();
 
-        // 合并分类：把 database/data-store 模块移到 infrastructure 中
         const infraCategory = data.categories.find(
           (c: RegistryCategory) => c.id === "infrastructure",
         );
@@ -1470,12 +848,10 @@ export function RegisterListTab({ apiBase }: { apiBase: string }) {
         );
 
         if (infraCategory && dbCategory) {
-          // 把 database 的模块合并到 infrastructure
           infraCategory.modules = [
             ...infraCategory.modules,
             ...dbCategory.modules,
           ];
-          // 过滤掉单独的 database/data-store 分类
           data.categories = data.categories.filter(
             (c: RegistryCategory) =>
               c.id !== "database" &&
@@ -1610,17 +986,9 @@ export function RegisterListTab({ apiBase }: { apiBase: string }) {
   };
 
   const handleAskAI = (target: ExplanationTarget) => {
-    console.log("Ask AI about:", target);
-    // TODO: 连接到你的 AI 聊天接口
     alert(`Ask AI about: ${target.name}`);
   };
 
-  // Handle settings button click
-  const [engines, setEngines] = React.useState<RegisteredEngine[]>([]);
-  const [enginesLoading, setEnginesLoading] = React.useState(false);
-  const [enginesError, setEnginesError] = React.useState<string | null>(null);
-
-  // 模拟策略引擎数据
   const mockPolicyEngines: RegisteredEngine[] = [
     {
       id: "security",
@@ -1772,24 +1140,11 @@ export function RegisterListTab({ apiBase }: { apiBase: string }) {
   ];
 
   const fetchEngines = React.useCallback(async () => {
-    setEnginesLoading(true);
-    setEnginesError(null);
     try {
       // 使用模拟数据而不是API调用
-      await new Promise((resolve) => setTimeout(resolve, 500)); // 添加小延迟模拟网络请求
-      setEngines(mockPolicyEngines);
-
-      /* 如果后端API准备好了，可以取消注释下面的代码
-      const res = await fetch(`${apiBase}/api/policy/engines`);
-      if (!res.ok) throw new Error(`HTTP ${res.status} ${await res.text()}`);
-      const data: RegisteredEngine[] = await res.json();
-      setEngines(data);
-      */
+      await new Promise((resolve) => setTimeout(resolve, 500));
     } catch (e: any) {
-      setEnginesError(e.message || String(e));
-      setEngines([]);
     } finally {
-      setEnginesLoading(false);
     }
   }, [apiBase]);
 
@@ -1805,31 +1160,10 @@ export function RegisterListTab({ apiBase }: { apiBase: string }) {
     }
   };
 
-  // Fetch registered policy engines when modal opens
-  const [registeredEngines, setRegisteredEngines] = React.useState<
-    RegisteredEngine[]
-  >([]);
-  const [engineLoading, setEngineLoading] = React.useState(false);
-  const [engineError, setEngineError] = React.useState<string | null>(null);
-
   React.useEffect(() => {
     if (!isEngineModalOpen) return;
-    setEngineLoading(true);
-    setEngineError(null);
 
-    // 使用模拟数据而不是API调用
-    setTimeout(() => {
-      setRegisteredEngines(mockPolicyEngines);
-      setEngineLoading(false);
-    }, 500);
-
-    /* 如果后端API准备好了，可以取消注释下面的代码
-    fetch(`${apiBase}/api/policy/engines`)
-      .then((res) => res.json())
-      .then((data) => setRegisteredEngines(data.engines))
-      .catch((e) => setEngineError(String(e)))
-      .finally(() => setEngineLoading(false));
-    */
+    setTimeout(() => {}, 500);
   }, [isEngineModalOpen, apiBase, mockPolicyEngines]);
 
   if (!registry) {
@@ -1843,7 +1177,6 @@ export function RegisterListTab({ apiBase }: { apiBase: string }) {
 
   return (
     <div className="space-y-6">
-      {/* Header Stats */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
         <Card>
           <CardContent className="p-4">

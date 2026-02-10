@@ -85,20 +85,6 @@ function JsonPanel({
   );
 }
 
-function OutlineButton(props: React.ComponentProps<typeof Button>) {
-  const { className, ...rest } = props;
-  return (
-    <Button
-      {...rest}
-      variant="outline"
-      className={[
-        "text-white border-white hover:bg-white hover:text-black",
-        className ?? "",
-      ].join(" ")}
-    />
-  );
-}
-
 interface ProvenanceTabProps {
   apiBase: string;
 }
@@ -352,7 +338,6 @@ export function ProvenanceTab({
 
                 <TabsContent value="overview" className="mt-3">
                   <div className="space-y-4">
-                    {/* 结构化视图 */}
                     <Card>
                       <CardHeader className="py-3">
                         <CardTitle className="text-sm">
@@ -361,7 +346,6 @@ export function ProvenanceTab({
                       </CardHeader>
                       <CardContent className="pt-0">
                         <div className="space-y-3">
-                          {/* Envelope Type Badge */}
                           <div>
                             <div className="text-xs font-medium text-muted-foreground mb-1">
                               Envelope Type
@@ -371,7 +355,6 @@ export function ProvenanceTab({
                             </Badge>
                           </div>
 
-                          {/* hitlRequest 特殊显示 */}
                           {prov?.envelope_type === "hitlRequest" &&
                             provInput?.envelope?.params && (
                               <>
@@ -434,7 +417,6 @@ export function ProvenanceTab({
                               </>
                             )}
 
-                          {/* policyEvaluate 特殊显示 */}
                           {prov?.envelope_type === "policyEvaluate" &&
                             provInput?.envelope?.params && (
                               <>
@@ -490,7 +472,6 @@ export function ProvenanceTab({
                               </>
                             )}
 
-                          {/* policyEvaluationResult 特殊显示 */}
                           {prov?.envelope_type === "policyEvaluationResult" &&
                             provInput?.envelope?.params && (
                               <>
@@ -583,7 +564,6 @@ export function ProvenanceTab({
                               </>
                             )}
 
-                          {/* 其他 envelope 类型的通用显示 */}
                           {prov?.envelope_type &&
                             prov.envelope_type !== "hitlRequest" &&
                             prov.envelope_type !== "policyEvaluate" &&

@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from "react";
+import { useState, useMemo } from "react";
 import { Search, X, FileText, Plus, ArrowUpDown } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -53,10 +53,8 @@ export default function PolicyKnowledgeLibrary() {
   const [editRuleDialogOpen, setEditRuleDialogOpen] = useState(false);
   const [editingRule, setEditingRule] = useState<Rule | null>(null);
 
-  // Filter rules based on current filters
   const filteredRules = useMemo(() => {
     return MOCK_RULES.filter((rule) => {
-      // Search filter
       if (filters.search) {
         const searchLower = filters.search.toLowerCase();
         const matchesSearch =
@@ -66,7 +64,6 @@ export default function PolicyKnowledgeLibrary() {
         if (!matchesSearch) return false;
       }
 
-      // Domain filter
       if (
         filters.domains.length > 0 &&
         !filters.domains.some((d) => rule.domain.includes(d))
@@ -74,7 +71,6 @@ export default function PolicyKnowledgeLibrary() {
         return false;
       }
 
-      // Jurisdiction filter
       if (
         filters.jurisdictions.length > 0 &&
         !filters.jurisdictions.some((j) => rule.jurisdiction.includes(j))
@@ -274,9 +270,7 @@ export default function PolicyKnowledgeLibrary() {
           <ScrollArea className="flex-1 p-6">
             <div
               className={cn(
-                viewMode === "grid"
-                  ? "grid grid-cols-2 gap-4"
-                  : "space-y-3",
+                viewMode === "grid" ? "grid grid-cols-2 gap-4" : "space-y-3",
               )}
             >
               {sortedRules.map((rule) => (
@@ -321,9 +315,7 @@ export default function PolicyKnowledgeLibrary() {
       <NewRuleDialog
         open={newRuleDialogOpen}
         onClose={() => setNewRuleDialogOpen(false)}
-        onSave={(newRule) => {
-          console.log("新规则创建:", newRule);
-          alert("新规则已成功创建!");
+        onSave={() => {
           setNewRuleDialogOpen(false);
         }}
         filterOptions={filterOptions}
@@ -337,9 +329,7 @@ export default function PolicyKnowledgeLibrary() {
           setEditRuleDialogOpen(false);
           setEditingRule(null);
         }}
-        onSave={(updatedRule) => {
-          console.log("规则已更新:", updatedRule);
-          alert("规则已成功更新!");
+        onSave={() => {
           setEditRuleDialogOpen(false);
           setEditingRule(null);
         }}

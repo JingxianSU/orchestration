@@ -240,7 +240,6 @@ export function ClientChat({
   const pollIntervalRef = React.useRef<Map<string, number>>(new Map());
   React.useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-    // 触发滚动回调
     onScroll?.();
   }, [messages.length, loading, onScroll]);
 
@@ -249,16 +248,15 @@ export function ClientChat({
   }, [messages.length, loading]);
 
   React.useEffect(() => {
-    if (!syncScroll) return; // 只在 sync 模式下启用
+    if (!syncScroll) return;
 
     const observerOptions = {
       root: null,
-      rootMargin: "-50% 0px -50% 0px", // 检测屏幕中心的消息
+      rootMargin: "-50% 0px -50% 0px",
       threshold: 0,
     };
 
     const observer = new IntersectionObserver((entries) => {
-      // 找到最接近屏幕中心的消息
       const visibleEntries = entries.filter((entry) => entry.isIntersecting);
       if (visibleEntries.length > 0) {
         const messageId =
@@ -278,7 +276,6 @@ export function ClientChat({
       }
     }, observerOptions);
 
-    // 观察所有可点击的消息
     const messageElements = document.querySelectorAll("[data-message-bubble]");
     messageElements.forEach((el) => observer.observe(el));
 
@@ -327,7 +324,7 @@ export function ClientChat({
       role: "user",
       content: text,
       createdAt: Date.now(),
-      status: autoMode ? undefined : "pending", // Auto 模式下不显示等待状态
+      status: autoMode ? undefined : "pending",
       history: messages.map((m) => ({
         role: m.role,
         content: m.content,
@@ -381,10 +378,9 @@ export function ClientChat({
         ),
       );
 
-      // Auto 模式下，轮询间隔更短，次数更少（因为后端会快速处理）
       let pollCount = 0;
-      const maxPolls = autoMode ? 60 : 120; // Auto 模式 60 次（60 秒）
-      const pollIntervalTime = autoMode ? 500 : 1000; // Auto 模式 500ms 一次
+      const maxPolls = autoMode ? 60 : 120;
+      const pollIntervalTime = autoMode ? 500 : 1000;
 
       const pollInterval = window.setInterval(async () => {
         pollCount++;
@@ -417,7 +413,7 @@ export function ClientChat({
           resp &&
           (resp.status === "completed" || resp.status === "rejected")
         ) {
-          console.log(`[CLIENT] Response data:`, resp); // ✅ 添加这个
+          console.log(`[CLIENT] Response data:`, resp);
           console.log(`[CLIENT] Citation:`, resp.citation);
           clearInterval(pollInterval);
           pollIntervalRef.current.delete(response.message_id);
@@ -484,7 +480,7 @@ export function ClientChat({
   }, [input, loading, messages, checkResponse, autoMode]);
 
   const sendMessage = React.useCallback(() => {
-    void sendMessageManual(); // Auto 和 Manual 都用这个
+    void sendMessageManual();
   }, [sendMessageManual]);
 
   const onKeyDown = React.useCallback(

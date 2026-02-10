@@ -29,8 +29,6 @@ async def lifespan(app: FastAPI):
     """Application lifespan management."""
     global _mongo
     
-    # Startup
-    print("[API] Starting up...")
     
     # Auto-load MCP servers from environment
     mcp_script = os.getenv("MCP_SERVER_SCRIPT")
@@ -46,7 +44,6 @@ async def lifespan(app: FastAPI):
                 env_vars={}
             )
             await mcp_manager.connect_server(server_id)
-            print(f"[API] Auto-loaded MCP server: {server_id}")
         except Exception as e:
             print(f"[API] Failed to auto-load MCP server: {e}")
     

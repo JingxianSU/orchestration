@@ -1,5 +1,3 @@
-import type React from "react";
-
 // ============ Types ============
 export interface Rule {
   id: string;

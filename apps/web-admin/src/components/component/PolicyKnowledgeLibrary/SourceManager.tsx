@@ -27,12 +27,6 @@ const SourceManager: React.FC<{
     reference: "",
   });
 
-  const addSource = () => {
-    if (!newSource.reference) return;
-    onChange([...(sources || []), { ...newSource }]);
-    setNewSource({ type: "regulation", reference: "" });
-  };
-
   const removeSource = (index: number) => {
     const target = sources[index];
     // clean object URL if exists

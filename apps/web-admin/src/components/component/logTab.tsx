@@ -21,7 +21,6 @@ import {
   Globe,
   Server,
   AlertCircle,
-  CheckCircle,
   XCircle,
   Copy,
   ChevronDown,
@@ -361,12 +360,10 @@ export function LogTab({ apiBase }: LogTabProps) {
   const [stats, setStats] = React.useState<LogStats | null>(null);
   const [isPaused, setIsPaused] = React.useState(false);
 
-  // Filters
   const [filterDirection, setFilterDirection] = React.useState<string>("all");
   const [filterMethod, setFilterMethod] = React.useState<string>("all");
   const [filterUrl, setFilterUrl] = React.useState<string>("");
 
-  // SSE connection for real-time logs
   React.useEffect(() => {
     if (isPaused) return;
 
@@ -381,12 +378,10 @@ export function LogTab({ apiBase }: LogTabProps) {
             const exists = prev.some((l) => l.id === logEntry.id);
             if (exists) return prev;
             const next = [logEntry, ...prev];
-            return next.slice(0, 500); // Keep last 500 logs
+            return next.slice(0, 500);
           });
         }
-      } catch (e) {
-        // Ignore parse errors
-      }
+      } catch (e) {}
     });
 
     return () => {
@@ -423,12 +418,10 @@ export function LogTab({ apiBase }: LogTabProps) {
     fetchLogs();
     fetchStats();
 
-    // Refresh stats periodically
     const interval = setInterval(fetchStats, 5000);
     return () => clearInterval(interval);
   }, [apiBase]);
 
-  // Clear logs handler
   const handleClearLogs = async () => {
     try {
       await fetch(`${apiBase}/api/logs`, { method: "DELETE" });
@@ -439,7 +432,6 @@ export function LogTab({ apiBase }: LogTabProps) {
     }
   };
 
-  // Filter logs
   const filteredLogs = React.useMemo(() => {
     return logs.filter((log) => {
       if (filterDirection !== "all" && log.direction !== filterDirection) {
@@ -448,7 +440,10 @@ export function LogTab({ apiBase }: LogTabProps) {
       if (filterMethod !== "all" && log.method !== filterMethod) {
         return false;
       }
-      if (filterUrl && !log.url.toLowerCase().includes(filterUrl.toLowerCase())) {
+      if (
+        filterUrl &&
+        !log.url.toLowerCase().includes(filterUrl.toLowerCase())
+      ) {
         return false;
       }
       return true;
@@ -457,7 +452,6 @@ export function LogTab({ apiBase }: LogTabProps) {
 
   return (
     <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 h-[calc(100vh-220px)]">
-      {/* Left Panel - Log List */}
       <Card className="flex flex-col">
         <CardHeader className="pb-3">
           <div className="flex items-center justify-between">

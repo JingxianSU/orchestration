@@ -35,20 +35,6 @@ function StatChip({ label, value }: { label: string; value: string }) {
   );
 }
 
-function _OutlineButton(props: React.ComponentProps<typeof Button>) {
-  const { className, ...rest } = props;
-  return (
-    <Button
-      {...rest}
-      variant="outline"
-      className={[
-        "text-white border-white hover:bg-white hover:text-black",
-        className ?? "",
-      ].join(" ")}
-    />
-  );
-}
-
 export function AdminDashboard({
   externalSelectedInfo,
   onSelectedIdChange,
@@ -72,13 +58,11 @@ export function AdminDashboard({
 }): React.JSX.Element {
   const API_BASE = "http://localhost:8000";
 
-  // Live (SSE)
   const [traces, setTraces] = React.useState<ChatTrace[]>([]);
   const [selectedId, setSelectedId] = React.useState<string | null>(null);
   const [status, setStatus] = React.useState<"disconnected" | "connected">(
     "disconnected",
   );
-  // 为LiveTab添加的日志状态
   const [httpLogs, setHttpLogs] = React.useState<any[]>([]);
   const [activeTab, setActiveTab] = React.useState<
     "live" | "provenance" | "register" | "logs" | "policy"
@@ -87,7 +71,6 @@ export function AdminDashboard({
   const handleLocalSelection = React.useCallback(
     (id: string | null) => {
       setSelectedId(id);
-      // 清除外部选择状态，让用户可以自由在 live 中切换
       onSelectedIdChange?.(null);
     },
     [onSelectedIdChange],
@@ -130,14 +113,12 @@ export function AdminDashboard({
     }
   }, [externalSelectedInfo, traces]);
 
-  // HITL Modal state
   const [hitlQueue, setHitlQueue] = React.useState<HITLRequest[]>([]);
   const [currentHitl, setCurrentHitl] = React.useState<HITLRequest | null>(
     null,
   );
   const [isRegenerating, setIsRegenerating] = React.useState<boolean>(false);
 
-  // Secondary Review state
   const [secondaryReview, setSecondaryReview] = React.useState<{
     messageId: string;
     traceId: string;
@@ -149,38 +130,23 @@ export function AdminDashboard({
   const [editedAdminPrompt, setEditedAdminPrompt] = React.useState<string>("");
   const [regenerateError, setRegenerateError] = React.useState<string>("");
 
-  // SSE connection
-  // SSE connection
-  // SSE connection
   React.useEffect(() => {
     const es = new EventSource(`${API_BASE}/api/stream`);
 
     es.addEventListener("open", () => {
-      console.log("[SSE] Connection opened");
       setStatus("connected");
     });
 
     es.addEventListener("error", () => {
-      console.error("[SSE] Connection error");
       setStatus("disconnected");
     });
 
     es.addEventListener("message", (evt: MessageEvent) => {
-      console.log("[SSE] Raw event received:", evt.data); // ✅ 添加原始数据日志
-
       try {
         const parsed = JSON.parse(String(evt.data));
-        console.log("[SSE] Parsed event:", parsed.type, parsed); // ✅ 添加解析后日志
 
         if (parsed.type === "client_message") {
-          console.log("[SSE] Client message received:", {
-            message_id: parsed.message_id,
-            trace_id: parsed.trace_id,
-            auto_mode: parsed.data?.meta?.auto_mode,
-          });
-
           const isAutoMode = parsed.data?.meta?.auto_mode === true;
-          console.log("[SSE] Is auto mode?", isAutoMode); // ✅ 确认 auto 模式检测
 
           if (!isAutoMode) {
             const req: HITLRequest = {
@@ -191,20 +157,12 @@ export function AdminDashboard({
               meta: parsed.data.meta,
               timestamp: parsed.ts,
             };
-            console.log("[SSE] Adding to HITL queue:", req.message_id);
             setHitlQueue((prev) => [...prev, req]);
           } else {
-            console.log("[SSE] Auto mode - skipping HITL queue");
           }
         }
 
         if (parsed.type === "message_approved") {
-          console.log("[SSE] Message approved received:", {
-            message_id: parsed.data.message_id,
-            trace_id: parsed.trace_id,
-            reviewer: parsed.data.reviewer,
-          });
-
           const item: ChatTrace = {
             id: `approved-${parsed.data.message_id}-${parsed.ts}`,
             createdAt: parsed.ts,
@@ -223,35 +181,21 @@ export function AdminDashboard({
             },
           };
 
-          console.log("[SSE] Created trace item:", item.id); // ✅ 确认创建了 trace
-
           setTraces((prev) => {
             const exists = prev.some((t) => t.id === item.id);
             if (exists) {
               console.warn("[SSE] Trace already exists:", item.id);
               return prev;
             }
-            console.log(
-              "[SSE] Adding trace to list, new length:",
-              prev.length + 1,
-            ); // ✅ 确认添加
             const next = [item, ...prev];
             return next.slice(0, 300);
           });
         }
 
         if (parsed.type === "llm_response_ready") {
-          console.log("[SSE] LLM response ready:", parsed.data.message_id);
         }
 
         if (parsed.type === "hitl_decision") {
-          console.log("[SSE] HITL decision received:", {
-            message_id: parsed.data.message_id,
-            trace_id: parsed.trace_id,
-            decision: parsed.data.decision,
-            reviewer: parsed.data.reviewer,
-          });
-
           const decisionTrace: ChatTrace = {
             id: `decision-${parsed.data.message_id}-${parsed.ts}`,
             createdAt: parsed.ts,
@@ -271,8 +215,6 @@ export function AdminDashboard({
             },
           };
 
-          console.log("[SSE] Created decision trace:", decisionTrace.id); // ✅ 确认创建
-
           setTraces((prev) => {
             const exists = prev.some((t) => t.id === decisionTrace.id);
             if (exists) {
@@ -282,10 +224,6 @@ export function AdminDashboard({
               );
               return prev;
             }
-            console.log(
-              "[SSE] Adding decision trace, new length:",
-              prev.length + 1,
-            ); // ✅ 确认添加
             const next = [decisionTrace, ...prev];
             return next.slice(0, 300);
           });
@@ -296,12 +234,10 @@ export function AdminDashboard({
     });
 
     return () => {
-      console.log("[SSE] Closing connection");
       es.close();
     };
   }, [API_BASE]);
 
-  // Process HITL queue
   React.useEffect(() => {
     if (currentHitl || hitlQueue.length === 0) return;
 
@@ -310,12 +246,6 @@ export function AdminDashboard({
       setHitlQueue((prev) => prev.slice(1));
 
       try {
-        console.log("[ADMIN] Sending raw message to provenance:", {
-          message_id: next.message_id,
-          trace_id: next.trace_id,
-          message: next.message.substring(0, 50),
-        });
-
         const storeResponse = await fetch(
           `${API_BASE}/api/provenance/raw-message`,
           {
@@ -334,7 +264,6 @@ export function AdminDashboard({
         const result = await storeResponse.json();
 
         if (storeResponse.ok) {
-          console.log("[ADMIN] Stored raw message to provenance:", result);
         } else {
           console.error(
             "[ADMIN] Failed to store raw message to provenance:",
@@ -380,11 +309,8 @@ export function AdminDashboard({
       }
 
       const result = await response.json();
-      console.log("[ADMIN] Decision result:", result);
 
       if (result.status === "awaiting_secondary_review") {
-        console.log("[ADMIN] Opening secondary review modal");
-
         setSecondaryReview({
           messageId: messageId,
           traceId: traceId,
@@ -396,7 +322,6 @@ export function AdminDashboard({
         setEditedAdminPrompt(adminPromptValue);
         setRegenerateError("");
       } else {
-        console.log("[ADMIN] Successfully sent ALLOW decision");
       }
     } catch (e) {
       console.error("Failed to send ALLOW decision:", e);
@@ -435,7 +360,6 @@ export function AdminDashboard({
       }
 
       const result = await response.json();
-      console.log("[ADMIN-REGENERATE] New response:", result);
 
       setEditedContent(result.llm_response);
 
@@ -480,7 +404,6 @@ export function AdminDashboard({
       if (!response.ok) {
         console.error("Failed to send REJECT decision");
       } else {
-        console.log("[ADMIN-SECONDARY] Successfully rejected LLM response");
       }
     } catch (e) {
       console.error("Failed to send REJECT decision:", e);
@@ -516,7 +439,6 @@ export function AdminDashboard({
       if (!response.ok) {
         console.error("Failed to send EDIT decision");
       } else {
-        console.log("[ADMIN-SECONDARY] Successfully sent edited response");
       }
     } catch (e) {
       console.error("Failed to send EDIT decision:", e);
@@ -549,7 +471,6 @@ export function AdminDashboard({
       if (!response.ok) {
         console.error("Failed to send APPROVE decision");
       } else {
-        console.log("[ADMIN-SECONDARY] Successfully approved LLM response");
       }
     } catch (e) {
       console.error("Failed to send APPROVE decision:", e);
@@ -580,7 +501,6 @@ export function AdminDashboard({
       if (!response.ok) {
         console.error("Failed to send DENY decision");
       } else {
-        console.log("[ADMIN] Successfully sent DENY decision");
       }
     } catch (e) {
       console.error("Failed to send DENY decision:", e);
@@ -608,7 +528,6 @@ export function AdminDashboard({
     }
   };
 
-  // 获取HTTP日志的函数
   const fetchHttpLogs = React.useCallback(async () => {
     try {
       const response = await fetch(`${API_BASE}/api/logs?limit=100`);
@@ -621,13 +540,10 @@ export function AdminDashboard({
     }
   }, [API_BASE]);
 
-  // 定期获取日志
   React.useEffect(() => {
-    // 初始加载
     fetchHttpLogs();
 
-    // 设置定时器
-    const logsInterval = setInterval(fetchHttpLogs, 10000); // 10秒刷新一次
+    const logsInterval = setInterval(fetchHttpLogs, 10000);
 
     return () => clearInterval(logsInterval);
   }, [fetchHttpLogs]);
@@ -738,11 +654,10 @@ export function AdminDashboard({
               triggerLiveScroll={triggerLiveScroll}
               autoMode={autoMode}
               onAutoModeChange={onAutoModeChange}
-              logs={httpLogs} // 传递日志数据到LiveTab组件
+              logs={httpLogs}
             />
           </TabsContent>
 
-          {/* LOGS TAB */}
           <TabsContent value="logs" className="mt-4">
             <LogTab apiBase={API_BASE} />
           </TabsContent>
@@ -751,7 +666,6 @@ export function AdminDashboard({
             <PolicyKnowledgeLibrary />
           </TabsContent>
 
-          {/* PROVENANCE TAB */}
           <TabsContent value="provenance" className="mt-4">
             <ProvenanceTab apiBase={API_BASE} />
           </TabsContent>

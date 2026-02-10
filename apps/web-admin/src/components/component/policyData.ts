@@ -1,6 +1,3 @@
-// policyData.ts
-
-// ============ 原有类型 ============
 export type PolicyRuleCategory = "content_input" | "content_output" | "system";
 
 export type PolicyRuleSeverity = "block" | "warn" | "info";
@@ -25,7 +22,6 @@ export interface PolicyDocument {
   version: string;
 }
 
-// ============ 新增类型 ============
 export type PolicyRequirement = "essential" | "conditional" | "recommended";
 export type PolicySeverityLevel = "critical" | "high" | "medium" | "low";
 export type PolicyEnforcement = "block" | "warn" | "log";

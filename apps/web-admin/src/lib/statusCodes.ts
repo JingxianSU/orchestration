@@ -40,43 +40,52 @@
 
 // ============ Enums ============
 
-export enum ResultStatus {
-  SUCCESS = 1,
-  FAILURE = 2,
-}
+export const ResultStatus = {
+  SUCCESS: 1,
+  FAILURE: 2,
+} as const;
+export type ResultStatus = (typeof ResultStatus)[keyof typeof ResultStatus];
 
-export enum ReviewerType {
-  HUMAN = 1,
-  MACHINE = 2,
-}
+export const ReviewerType = {
+  HUMAN: 1,
+  MACHINE: 2,
+} as const;
+export type ReviewerType = (typeof ReviewerType)[keyof typeof ReviewerType];
 
-export enum MessageStatus {
-  ORIGINAL = 1,
-  MODIFIED = 2,
-  INFO_ADDED = 3,
-}
+export const MessageStatus = {
+  ORIGINAL: 1,
+  MODIFIED: 2,
+  INFO_ADDED: 3,
+} as const;
+export type MessageStatus = (typeof MessageStatus)[keyof typeof MessageStatus];
 
-export enum HasExplanation {
-  NO = 1,
-  YES = 2,
-}
+export const HasExplanation = {
+  NO: 1,
+  YES: 2,
+} as const;
+export type HasExplanation =
+  (typeof HasExplanation)[keyof typeof HasExplanation];
 
-export enum ContentCombination {
-  NONE = 1,
-  INTERPRETATION_ONLY = 2,
-  EXPLANATION_ONLY = 3,
-  BOTH = 4,
-}
+export const ContentCombination = {
+  NONE: 1,
+  INTERPRETATION_ONLY: 2,
+  EXPLANATION_ONLY: 3,
+  BOTH: 4,
+} as const;
+export type ContentCombination =
+  (typeof ContentCombination)[keyof typeof ContentCombination];
 
-export enum ExplanationSource {
-  NONE = 1,
-  INTERNAL_REF = 2,
-  EXTERNAL_REF = 3,
-  INTERNAL_EXTERNAL_REF = 4,
-  CASE_INTERNAL = 5,
-  CASE_EXTERNAL = 6,
-  CASE_INTERNAL_EXTERNAL = 7,
-}
+export const ExplanationSource = {
+  NONE: 1,
+  INTERNAL_REF: 2,
+  EXTERNAL_REF: 3,
+  INTERNAL_EXTERNAL_REF: 4,
+  CASE_INTERNAL: 5,
+  CASE_EXTERNAL: 6,
+  CASE_INTERNAL_EXTERNAL: 7,
+} as const;
+export type ExplanationSource =
+  (typeof ExplanationSource)[keyof typeof ExplanationSource];
 
 // ============ Types ============
 
@@ -102,7 +111,9 @@ export interface StatusCodeInfo {
 /**
  * Build a 7-digit status code from components
  */
-export function buildStatusCode(components: Partial<StatusCodeComponents>): string {
+export function buildStatusCode(
+  components: Partial<StatusCodeComponents>,
+): string {
   const {
     resultStatus = ResultStatus.SUCCESS,
     reviewerType = ReviewerType.HUMAN,
@@ -479,7 +490,7 @@ export const SECONDARY_REJECT_REASONS = [
 export function migrateFromHttpCode(
   httpCode: number,
   isEdited: boolean = false,
-  isHuman: boolean = true
+  isHuman: boolean = true,
 ): string {
   const reviewerType = isHuman ? ReviewerType.HUMAN : ReviewerType.MACHINE;
 

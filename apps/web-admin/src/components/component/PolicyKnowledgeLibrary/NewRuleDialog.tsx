@@ -28,7 +28,6 @@ import { cn } from "@/lib/utils";
 
 import type {
   Rule,
-  Source,
   FilterOptions,
   InferenceModel,
   RiskLevel,
@@ -83,10 +82,7 @@ const NewRuleDialog: React.FC<NewRuleDialogProps> = ({
   });
 
   const [activeTab, setActiveTab] = useState("basic");
-  const [newSource, setNewSource] = useState<Source>({
-    type: "regulation",
-    reference: "",
-  });
+
   const [errors, setErrors] = useState<Record<string, string>>({});
 
   const updateRule = (field: keyof Rule, value: any) => {
@@ -98,22 +94,6 @@ const NewRuleDialog: React.FC<NewRuleDialogProps> = ({
         return newErrors;
       });
     }
-  };
-
-  const addSource = () => {
-    if (!newSource.reference) return;
-    setRuleData((prev) => ({
-      ...prev,
-      source: [...(prev.source || []), { ...newSource }],
-    }));
-    setNewSource({ type: "regulation", reference: "" });
-  };
-
-  const removeSource = (index: number) => {
-    setRuleData((prev) => ({
-      ...prev,
-      source: (prev.source || []).filter((_, i) => i !== index),
-    }));
   };
 
   const validateForm = () => {
@@ -566,10 +546,7 @@ const NewRuleDialog: React.FC<NewRuleDialogProps> = ({
                             <div className="flex items-center gap-2">
                               {tw.color && (
                                 <div
-                                  className={cn(
-                                    "w-3 h-3 rounded",
-                                    tw.color,
-                                  )}
+                                  className={cn("w-3 h-3 rounded", tw.color)}
                                 />
                               )}
                               {tw.label}

@@ -68,8 +68,6 @@ type HITLRequest = {
   timestamp: number;
 };
 
-// Status codes are now imported from @/lib/statusCodes
-
 function safeStringify(value: unknown): string {
   try {
     return JSON.stringify(value, null, 2);
@@ -87,7 +85,6 @@ function tryGet(obj: unknown, path: string[]): unknown {
   return cur;
 }
 
-// Helper function to get status badge properties from 7-digit code
 function getStatusBadge(statusCode: string) {
   const info = getStatusCodeInfo(statusCode);
   return {
@@ -96,7 +93,6 @@ function getStatusBadge(statusCode: string) {
   };
 }
 
-// Helper to build status code for display
 function buildDisplayCode(
   isSuccess: boolean,
   isHuman: boolean,
@@ -212,7 +208,6 @@ interface LiveTabProps {
   onAutoModeChange?: (auto: boolean) => void;
 }
 
-// 添加日志对话框组件
 function LogDetailsDialog({
   open,
   onOpenChange,
@@ -224,23 +219,19 @@ function LogDetailsDialog({
   selectedPayload: any;
   logs: any[];
 }) {
-  // 获取消息ID、内容和时间戳
   const messageId = selectedPayload?.message_id;
   const messageContent =
     selectedPayload?.original_message || selectedPayload?.llm_response?.content;
   const timestamp = selectedPayload?.timestamp;
   const originalMessage = selectedPayload?.original_message;
 
-  // 使用更智能的方式查找相关日志，而不仅仅依赖traceId
   const relatedLogs = React.useMemo(() => {
     if (!selectedPayload) return [];
 
-    // 创建时间戳窗口 - 选择记录前后5秒内的日志
     const timestampNum = timestamp ? new Date(timestamp).getTime() / 1000 : 0;
-    const timeWindow = 5; // 5秒窗口
+    const timeWindow = 5;
 
     return logs.filter((log) => {
-      // 1. 时间窗口匹配
       if (timestampNum > 0) {
         const logTime = log.timestamp;
         if (Math.abs(logTime - timestampNum) > timeWindow) {
@@ -248,9 +239,7 @@ function LogDetailsDialog({
         }
       }
 
-      // 2. 内容匹配 - 检查请求或响应体是否包含消息内容的片段
       if (messageContent && messageContent.length > 10) {
-        // 取内容的一部分作为特征字符串
         const contentSnippet = messageContent.substring(0, 20);
         const hasContent =
           (log.request_body && log.request_body.includes(contentSnippet)) ||
@@ -258,7 +247,6 @@ function LogDetailsDialog({
         if (hasContent) return true;
       }
 
-      // 3. 消息ID匹配 - 检查请求或响应中是否包含消息ID
       if (messageId) {
         const hasMessageId =
           (log.request_body && log.request_body.includes(messageId)) ||
@@ -266,12 +254,10 @@ function LogDetailsDialog({
         if (hasMessageId) return true;
       }
 
-      // 4. 对于Claude API URL的特殊处理
       if (log.url.includes("/claude/") && originalMessage) {
         return true;
       }
 
-      // 5. 检查是否为相关API端点 - 根据消息类型匹配可能的API路径
       if (
         selectedPayload.type === "hitl_decision" &&
         log.url.includes("/hitl/")
@@ -279,7 +265,6 @@ function LogDetailsDialog({
         return true;
       }
 
-      // 6. 如果日志的trace_id与记录匹配，也包含
       if (
         selectedPayload.trace_id &&
         log.trace_id === selectedPayload.trace_id
@@ -468,9 +453,8 @@ export function LiveTab({
   triggerLiveScroll,
   autoMode,
   onAutoModeChange,
-  logs = [], // 添加日志数据参数
+  logs = [],
 }: LiveTabProps & { logs?: any[] }): React.JSX.Element {
-  // 添加日志对话框的状态
   const [logDialogOpen, setLogDialogOpen] = React.useState(false);
   const [logDialogPayload, setLogDialogPayload] = React.useState<any>(null);
   const [editableUserMessage, setEditableUserMessage] =
@@ -494,37 +478,7 @@ export function LiveTab({
     [traces, selectedId],
   );
   const selectedTraceRef = React.useRef<HTMLButtonElement>(null);
-  React.useEffect(() => {
-    console.log("[LiveTab] Traces updated, count:", traces.length);
-    console.log(
-      "[LiveTab] Trace types:",
-      traces.map((t) => (t.payload as any)?.type),
-    );
-  }, [traces]);
-  // 自动批准用户消息
-  // React.useEffect(() => {
-  //   if (autoMode && currentHitl) {
-  //     console.log(
-  //       "[AUTO-MODE] Auto-approving user message:",
-  //       currentHitl.message_id,
-  //     );
-  //     void onHandleAllow(currentHitl.message_id, currentHitl.trace_id, {
-  //       override_message: currentHitl.message,
-  //       admin_prompt: "",
-  //     });
-  //   }
-  // }, [autoMode, currentHitl, onHandleAllow]);
-
-  // 自动批准 AI 响应
-  // React.useEffect(() => {
-  //   if (autoMode && secondaryReview) {
-  //     console.log(
-  //       "[AUTO-MODE] Auto-approving AI response:",
-  //       secondaryReview.messageId,
-  //     );
-  //     void onHandleSecondarySend();
-  //   }
-  // }, [autoMode, secondaryReview, onHandleSecondarySend]);
+  React.useEffect(() => {}, [traces]);
   React.useEffect(() => {
     if (syncScroll && triggerLiveScroll && triggerLiveScroll > 0) {
       const scrollContainer = scrollAreaRef.current?.querySelector(
@@ -589,7 +543,6 @@ export function LiveTab({
         : isEdited
           ? MessageStatus.MODIFIED
           : MessageStatus.ORIGINAL;
-      // 判断是否为人工审核：如果 reviewer 包含 "auto" 或 "system" 或 "policy" 则为机器审核
       const reviewerLower = (payload.reviewer || "").toLowerCase();
       const isHumanReviewer =
         !reviewerLower.includes("auto") &&
@@ -634,10 +587,8 @@ export function LiveTab({
       const reviewType = payload.review_type || "primary_review";
       const errorCode = payload.error_code;
 
-      // Check for policy violations (string error codes)
       const isPolicyViolation =
         typeof errorCode === "string" && errorCode.includes("POLICY_VIOLATION");
-      // 判断是否为人工审核：如果 reviewer 包含 "auto" 或 "system" 或 "policy" 则为机器审核
       const reviewerLower = (payload.reviewer || "").toLowerCase();
       const isHumanReviewer =
         !reviewerLower.includes("auto") &&
@@ -648,11 +599,10 @@ export function LiveTab({
       let badge: { label: string; className: string };
 
       if (isPolicyViolation) {
-        // Policy violation - use special badge with AI reviewer
         const isInput = errorCode === "INPUT_POLICY_VIOLATION";
         statusCode = buildDisplayCode(
           false,
-          false, // AI/system reviewer
+          false,
           MessageStatus.ORIGINAL,
           HasExplanation.YES,
           ContentCombination.EXPLANATION_ONLY,
@@ -665,7 +615,6 @@ export function LiveTab({
           className: "bg-orange-500 text-white hover:bg-orange-600",
         };
       } else if (decision === "DENY") {
-        // Use error_code if it's already a 7-digit code, otherwise build one
         if (typeof errorCode === "string" && /^\d{7}$/.test(errorCode)) {
           statusCode = errorCode;
         } else {
@@ -726,7 +675,6 @@ export function LiveTab({
       );
     }
 
-    // Handle policy_evaluation events
     if (payload?.type === "policy_evaluation") {
       const policyType = payload.policy_type;
       const decision = payload.decision;
@@ -789,8 +737,7 @@ export function LiveTab({
   const isMessageApproved = traceType === "message_approved";
   const isHitlDecision = traceType === "hitl_decision";
   const isPolicyEvaluation = traceType === "policy_evaluation";
-  void isPolicyEvaluation; // For future use in detail panel
-
+  void isPolicyEvaluation;
   const messageApprovedData = isMessageApproved
     ? {
         original_message: tryGet(selectedPayload, ["original_message"]),
@@ -805,7 +752,6 @@ export function LiveTab({
 
   return (
     <>
-      {/* 日志详情对话框 */}
       <LogDetailsDialog
         open={logDialogOpen}
         onOpenChange={setLogDialogOpen}
@@ -1648,7 +1594,6 @@ export function LiveTab({
                                   size="sm"
                                   variant="outline"
                                   onClick={() => {
-                                    // 打开日志对话框，并传递整个payload
                                     if (selectedPayload) {
                                       setLogDialogPayload(selectedPayload);
                                       setLogDialogOpen(true);
@@ -1873,8 +1818,10 @@ export function LiveTab({
                       error_code: (selectedPayload as any).error_code,
                       reviewer: (selectedPayload as any).reviewer,
                       review_type: (selectedPayload as any).review_type,
-                      enriched_at: (selectedPayload as any).llm_response?._meta?.enriched_at,
-                      policy: (selectedPayload as any).llm_response?._meta?.policy,
+                      enriched_at: (selectedPayload as any).llm_response?._meta
+                        ?.enriched_at,
+                      policy: (selectedPayload as any).llm_response?._meta
+                        ?.policy,
                     }}
                   />
                 </TabsContent>

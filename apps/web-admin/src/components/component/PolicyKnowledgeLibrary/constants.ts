@@ -1,6 +1,3 @@
-// constants.ts
-// 单一出口：UI constants + filter options + mock rules + knowledge asset types + mock assets + mapping helpers
-
 import type { ElementType } from "react";
 import {
   FileText,
@@ -180,7 +177,11 @@ export const DEFAULT_FILTER_OPTIONS: FilterOptions = {
   ],
   trustWorthys: [
     { value: "explain", label: "Explain", color: "bg-blue-500" },
-    { value: "interpretation", label: "Interpretation", color: "bg-purple-500" },
+    {
+      value: "interpretation",
+      label: "Interpretation",
+      color: "bg-purple-500",
+    },
     { value: "case", label: "Case", color: "bg-amber-500" },
     { value: "other", label: "Other", color: "bg-gray-500" },
   ],
@@ -573,15 +574,10 @@ export type NeuralNetAsset = KnowledgeAssetBase & {
 
 export type AnyAsset = RdrAsset | KgAsset | NeuralNetAsset;
 
-// =========================
-// ✅ 模拟 3 个 Knowledge Base：各自包含多条 assets
-// 规则：只对这 3 个 kbId 返回内容，其它 kbId 为空
-// =========================
 const KB_RDR = "RS-DATA-PRIVACY-001";
 const KB_KG = "RS-CLINICAL-AI-001";
 const KB_NN = "RS-RISK-MGMT-001";
 
-/** ---------- RDR KB: multiple assets ---------- */
 export const KB_RDR_ASSETS: RdrAsset[] = [
   {
     id: "ASSET-RDR-PII-EXPORT-01",
@@ -1434,8 +1430,6 @@ export function countTreeNodes(node: RdrNode): {
   return { total, maxDepth, leaves };
 }
 
-// ✅ 关键：点开某个 Knowledge Base（你的 Rule）时，用这个拿"该 KB 内的多条 assets"
-// 没有模拟的 KB 返回 []
 export function getAssetsByKnowledgeBase(kb: Rule): AnyAsset[] {
   const ids = KB_TO_ASSET_IDS[kb.id];
   if (!ids || ids.length === 0) return [];

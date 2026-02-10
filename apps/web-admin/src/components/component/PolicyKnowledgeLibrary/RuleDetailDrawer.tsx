@@ -32,10 +32,9 @@ import { Separator } from "@/components/ui/separator";
 import { cn } from "@/lib/utils";
 
 import type { Rule, FilterOptions } from "./types";
-import { getIconComponent, getRiskColor, getActionColor, KB_TO_ASSET_IDS, ASSET_REGISTRY } from "./constants";
+import { getIconComponent, getRiskColor, getActionColor } from "./constants";
 import ModelTrainingDialog from "./training/ModelTrainingDialog";
 
-// ============ RDR Tree Types & Component ============
 interface RdrTreeNode {
   id: string;
   label: string;
@@ -45,7 +44,10 @@ interface RdrTreeNode {
   stats?: { support: number; precision: number };
 }
 
-const RdrTreeView: React.FC<{ node: RdrTreeNode; depth?: number }> = ({ node, depth = 0 }) => {
+const RdrTreeView: React.FC<{ node: RdrTreeNode; depth?: number }> = ({
+  node,
+  depth = 0,
+}) => {
   const [expanded, setExpanded] = useState(depth < 2);
   const hasChildren = node.children && node.children.length > 0;
   const isLeaf = !!node.conclusion;
@@ -53,27 +55,40 @@ const RdrTreeView: React.FC<{ node: RdrTreeNode; depth?: number }> = ({ node, de
   return (
     <div className="select-none">
       <div
-        className={`flex items-center gap-2 py-1.5 px-2 rounded hover:bg-gray-100 cursor-pointer ${depth === 0 ? 'font-medium' : ''}`}
+        className={`flex items-center gap-2 py-1.5 px-2 rounded hover:bg-gray-100 cursor-pointer ${depth === 0 ? "font-medium" : ""}`}
         style={{ marginLeft: depth * 20 }}
         onClick={() => hasChildren && setExpanded(!expanded)}
       >
         {hasChildren ? (
-          expanded ? <ChevronDown className="h-4 w-4 text-gray-400" /> : <ChevronRight className="h-4 w-4 text-gray-400" />
+          expanded ? (
+            <ChevronDown className="h-4 w-4 text-gray-400" />
+          ) : (
+            <ChevronRight className="h-4 w-4 text-gray-400" />
+          )
         ) : (
-          <Circle className={`h-3 w-3 ${isLeaf ? (node.conclusion?.action === 'allow' ? 'fill-green-500 text-green-500' : node.conclusion?.action === 'deny' ? 'fill-red-500 text-red-500' : 'fill-amber-500 text-amber-500') : 'text-gray-300'}`} />
+          <Circle
+            className={`h-3 w-3 ${isLeaf ? (node.conclusion?.action === "allow" ? "fill-green-500 text-green-500" : node.conclusion?.action === "deny" ? "fill-red-500 text-red-500" : "fill-amber-500 text-amber-500") : "text-gray-300"}`}
+          />
         )}
-        <span className={`text-sm ${isLeaf ? 'font-medium' : ''}`}>{node.label}</span>
+        <span className={`text-sm ${isLeaf ? "font-medium" : ""}`}>
+          {node.label}
+        </span>
         {node.condition && (
-          <code className="text-xs bg-gray-100 px-1.5 py-0.5 rounded text-gray-600">{node.condition}</code>
+          <code className="text-xs bg-gray-100 px-1.5 py-0.5 rounded text-gray-600">
+            {node.condition}
+          </code>
         )}
         {node.conclusion && (
-          <Badge className={`text-xs ml-2 ${node.conclusion.action === 'allow' ? 'bg-green-100 text-green-700' : node.conclusion.action === 'deny' ? 'bg-red-100 text-red-700' : 'bg-amber-100 text-amber-700'}`}>
+          <Badge
+            className={`text-xs ml-2 ${node.conclusion.action === "allow" ? "bg-green-100 text-green-700" : node.conclusion.action === "deny" ? "bg-red-100 text-red-700" : "bg-amber-100 text-amber-700"}`}
+          >
             {node.conclusion.action}
           </Badge>
         )}
         {node.stats && (
           <span className="text-xs text-gray-400 ml-auto">
-            {node.stats.support} cases • {(node.stats.precision * 100).toFixed(0)}%
+            {node.stats.support} cases •{" "}
+            {(node.stats.precision * 100).toFixed(0)}%
           </span>
         )}
       </div>
@@ -88,9 +103,12 @@ const RdrTreeView: React.FC<{ node: RdrTreeNode; depth?: number }> = ({ node, de
   );
 };
 
-// ============ KG Graph Types & Component ============
 interface KgGraphData {
-  nodes: { id: string; label: string; type: "concept" | "rule" | "entity" | "evidence" }[];
+  nodes: {
+    id: string;
+    label: string;
+    type: "concept" | "rule" | "entity" | "evidence";
+  }[];
   edges: { from: string; to: string; label: string }[];
 }
 
@@ -103,7 +121,8 @@ const KgGraphView: React.FC<{ graph: KgGraphData }> = ({ graph }) => {
   };
 
   const positions: Record<string, { x: number; y: number }> = {};
-  const centerX = 280, centerY = 160;
+  const centerX = 280,
+    centerY = 160;
   graph.nodes.forEach((node, i) => {
     const angle = (i / graph.nodes.length) * 2 * Math.PI - Math.PI / 2;
     const radius = 100 + (i % 2) * 30;
@@ -114,7 +133,10 @@ const KgGraphView: React.FC<{ graph: KgGraphData }> = ({ graph }) => {
   });
 
   return (
-    <div className="relative border rounded-lg bg-gray-50 overflow-hidden" style={{ height: 320 }}>
+    <div
+      className="relative border rounded-lg bg-gray-50 overflow-hidden"
+      style={{ height: 320 }}
+    >
       <svg width="100%" height="100%" viewBox="0 0 560 320">
         {graph.edges.map((edge, i) => {
           const from = positions[edge.from];
@@ -124,24 +146,52 @@ const KgGraphView: React.FC<{ graph: KgGraphData }> = ({ graph }) => {
           const midY = (from.y + to.y) / 2;
           return (
             <g key={i}>
-              <line x1={from.x} y1={from.y} x2={to.x} y2={to.y} stroke="#9ca3af" strokeWidth={1.5} markerEnd="url(#arrow)" />
-              <text x={midX} y={midY - 5} textAnchor="middle" className="fill-gray-500" fontSize={9}>{edge.label}</text>
+              <line
+                x1={from.x}
+                y1={from.y}
+                x2={to.x}
+                y2={to.y}
+                stroke="#9ca3af"
+                strokeWidth={1.5}
+                markerEnd="url(#arrow)"
+              />
+              <text
+                x={midX}
+                y={midY - 5}
+                textAnchor="middle"
+                className="fill-gray-500"
+                fontSize={9}
+              >
+                {edge.label}
+              </text>
             </g>
           );
         })}
         <defs>
-          <marker id="arrow" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+          <marker
+            id="arrow"
+            markerWidth="10"
+            markerHeight="7"
+            refX="9"
+            refY="3.5"
+            orient="auto"
+          >
             <polygon points="0 0, 10 3.5, 0 7" fill="#9ca3af" />
           </marker>
         </defs>
       </svg>
-      {graph.nodes.map(node => {
+      {graph.nodes.map((node) => {
         const pos = positions[node.id];
         return (
           <div
             key={node.id}
             className={`absolute px-2 py-1 rounded-lg border-2 text-xs font-medium shadow-sm ${nodeColors[node.type]}`}
-            style={{ left: pos.x - 35, top: pos.y - 10, minWidth: 70, textAlign: 'center' }}
+            style={{
+              left: pos.x - 35,
+              top: pos.y - 10,
+              minWidth: 70,
+              textAlign: "center",
+            }}
           >
             {node.label}
           </div>
@@ -159,8 +209,7 @@ const KgGraphView: React.FC<{ graph: KgGraphData }> = ({ graph }) => {
   );
 };
 
-// ============ Mock Data Generators ============
-const generateMockRdrTree = (rule: Rule): RdrTreeNode => ({
+const generateMockRdrTree = (): RdrTreeNode => ({
   id: "root",
   label: "Root",
   children: [
@@ -182,20 +231,49 @@ const generateMockRdrTree = (rule: Rule): RdrTreeNode => ({
               condition: "hasApproval == true",
               stats: { support: 980, precision: 0.99 },
               children: [
-                { id: "n3a", label: "ALLOW", conclusion: { action: "allow", reason: "Approved PII export" }, stats: { support: 980, precision: 0.99 } }
-              ]
+                {
+                  id: "n3a",
+                  label: "ALLOW",
+                  conclusion: {
+                    action: "allow",
+                    reason: "Approved PII export",
+                  },
+                  stats: { support: 980, precision: 0.99 },
+                },
+              ],
             },
-            { id: "n4", label: "REQUIRE APPROVAL", conclusion: { action: "require_approval", reason: "Needs explicit approval" }, stats: { support: 2140, precision: 0.94 } }
-          ]
+            {
+              id: "n4",
+              label: "REQUIRE APPROVAL",
+              conclusion: {
+                action: "require_approval",
+                reason: "Needs explicit approval",
+              },
+              stats: { support: 2140, precision: 0.94 },
+            },
+          ],
         },
-        { id: "n5", label: "DENY", conclusion: { action: "deny", reason: "Outside approved jurisdictions" }, stats: { support: 3120, precision: 0.98 } }
-      ]
+        {
+          id: "n5",
+          label: "DENY",
+          conclusion: {
+            action: "deny",
+            reason: "Outside approved jurisdictions",
+          },
+          stats: { support: 3120, precision: 0.98 },
+        },
+      ],
     },
-    { id: "n6", label: "ALLOW", conclusion: { action: "allow", reason: "No PII detected" }, stats: { support: 12000, precision: 0.97 } }
-  ]
+    {
+      id: "n6",
+      label: "ALLOW",
+      conclusion: { action: "allow", reason: "No PII detected" },
+      stats: { support: 12000, precision: 0.97 },
+    },
+  ],
 });
 
-const generateMockKgGraph = (rule: Rule): KgGraphData => ({
+const generateMockKgGraph = (): KgGraphData => ({
   nodes: [
     { id: "c1", label: "Medical Diagnosis", type: "concept" },
     { id: "c2", label: "FDA Approval", type: "concept" },
@@ -301,7 +379,10 @@ const RuleDetailDrawer: React.FC<RuleDetailDrawerProps> = ({
           </div>
         </SheetHeader>
 
-        <Tabs defaultValue="properties" className="flex-1 flex flex-col min-h-0">
+        <Tabs
+          defaultValue="properties"
+          className="flex-1 flex flex-col min-h-0"
+        >
           <TabsList className="px-6 py-2 border-b justify-start rounded-none bg-transparent h-auto flex-shrink-0">
             <TabsTrigger
               value="properties"
@@ -374,11 +455,7 @@ const RuleDetailDrawer: React.FC<RuleDetailDrawerProps> = ({
                         </span>
                         <div className="flex flex-wrap gap-1 w-full">
                           {rule.jurisdiction.map((j) => (
-                            <Badge
-                              key={j}
-                              variant="outline"
-                              className="gap-1"
-                            >
+                            <Badge key={j} variant="outline" className="gap-1">
                               <Globe className="h-3 w-3" />
                               {filterOptions.jurisdictions.find(
                                 (jur) => jur.value === j,
@@ -508,8 +585,7 @@ const RuleDetailDrawer: React.FC<RuleDetailDrawerProps> = ({
                               return (
                                 <>
                                   <ModelIcon className="h-3 w-3" />
-                                  {modelOption?.label ||
-                                    rule.inferenceModel}
+                                  {modelOption?.label || rule.inferenceModel}
                                 </>
                               );
                             })()}
@@ -545,14 +621,18 @@ const RuleDetailDrawer: React.FC<RuleDetailDrawerProps> = ({
                         <span className="text-sm font-medium text-gray-600 w-full sm:w-32 flex-shrink-0">
                           Owner:
                         </span>
-                        <span className="text-sm text-gray-700">{rule.owner}</span>
+                        <span className="text-sm text-gray-700">
+                          {rule.owner}
+                        </span>
                       </div>
 
                       <div className="flex items-start gap-2 flex-wrap sm:flex-nowrap">
                         <span className="text-sm font-medium text-gray-600 w-full sm:w-32 flex-shrink-0">
                           Version:
                         </span>
-                        <span className="text-sm text-gray-700 font-mono">{rule.version}</span>
+                        <span className="text-sm text-gray-700 font-mono">
+                          {rule.version}
+                        </span>
                       </div>
                     </div>
                   </div>
@@ -570,12 +650,14 @@ const RuleDetailDrawer: React.FC<RuleDetailDrawerProps> = ({
                       Source Documents
                     </h4>
                     <Badge variant="outline" className="text-xs">
-                      {rule.source.length} source{rule.source.length !== 1 ? "s" : ""}
+                      {rule.source.length} source
+                      {rule.source.length !== 1 ? "s" : ""}
                     </Badge>
                   </div>
 
                   <p className="text-sm text-gray-500">
-                    Regulatory references, standards, and internal documents that define this policy.
+                    Regulatory references, standards, and internal documents
+                    that define this policy.
                   </p>
 
                   {rule.source.length > 0 ? (
@@ -621,9 +703,12 @@ const RuleDetailDrawer: React.FC<RuleDetailDrawerProps> = ({
                   ) : (
                     <div className="text-center py-12 bg-gray-50 rounded-lg">
                       <FileText className="h-10 w-10 text-gray-300 mx-auto mb-3" />
-                      <p className="text-sm text-gray-500 font-medium">No sources added</p>
+                      <p className="text-sm text-gray-500 font-medium">
+                        No sources added
+                      </p>
                       <p className="text-xs text-gray-400 mt-1">
-                        Add regulatory references or internal documents to support this policy
+                        Add regulatory references or internal documents to
+                        support this policy
                       </p>
                     </div>
                   )}
@@ -640,20 +725,31 @@ const RuleDetailDrawer: React.FC<RuleDetailDrawerProps> = ({
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-3">
                       <div className="p-2 bg-gray-100 rounded-lg">
-                        {rule.inferenceModel === "rdr" && <Database className="h-5 w-5 text-blue-600" />}
-                        {rule.inferenceModel === "knowledge_graph" && <Globe className="h-5 w-5 text-green-600" />}
-                        {rule.inferenceModel === "neural_network" && <Cpu className="h-5 w-5 text-purple-600" />}
+                        {rule.inferenceModel === "rdr" && (
+                          <Database className="h-5 w-5 text-blue-600" />
+                        )}
+                        {rule.inferenceModel === "knowledge_graph" && (
+                          <Globe className="h-5 w-5 text-green-600" />
+                        )}
+                        {rule.inferenceModel === "neural_network" && (
+                          <Cpu className="h-5 w-5 text-purple-600" />
+                        )}
                       </div>
                       <div>
                         <h4 className="text-sm font-medium text-gray-700">
                           {rule.inferenceModel === "rdr" && "Ripple Down Rules"}
-                          {rule.inferenceModel === "knowledge_graph" && "Knowledge Graph"}
-                          {rule.inferenceModel === "neural_network" && "Neural Network"}
+                          {rule.inferenceModel === "knowledge_graph" &&
+                            "Knowledge Graph"}
+                          {rule.inferenceModel === "neural_network" &&
+                            "Neural Network"}
                         </h4>
                         <p className="text-xs text-gray-500">
-                          {rule.inferenceModel === "rdr" && "Rule-based decision tree with exception handling"}
-                          {rule.inferenceModel === "knowledge_graph" && "Graph-based reasoning with entity relationships"}
-                          {rule.inferenceModel === "neural_network" && "Deep learning model for pattern classification"}
+                          {rule.inferenceModel === "rdr" &&
+                            "Rule-based decision tree with exception handling"}
+                          {rule.inferenceModel === "knowledge_graph" &&
+                            "Graph-based reasoning with entity relationships"}
+                          {rule.inferenceModel === "neural_network" &&
+                            "Deep learning model for pattern classification"}
                         </p>
                       </div>
                     </div>
@@ -664,7 +760,9 @@ const RuleDetailDrawer: React.FC<RuleDetailDrawerProps> = ({
                       className="gap-2"
                     >
                       <Play className="h-4 w-4" />
-                      {rule.source.length > 0 ? "Train Model" : "Configure Training"}
+                      {rule.source.length > 0
+                        ? "Train Model"
+                        : "Configure Training"}
                     </Button>
                   </div>
 
@@ -672,7 +770,9 @@ const RuleDetailDrawer: React.FC<RuleDetailDrawerProps> = ({
                   {rule.source.length === 0 && (
                     <div className="flex items-center gap-2 p-3 bg-amber-50 border border-amber-200 rounded-lg text-sm text-amber-700">
                       <FileText className="h-4 w-4" />
-                      <span>Add source documents in the Source tab before training.</span>
+                      <span>
+                        Add source documents in the Source tab before training.
+                      </span>
                     </div>
                   )}
 
@@ -687,7 +787,7 @@ const RuleDetailDrawer: React.FC<RuleDetailDrawerProps> = ({
                         </div>
                         <div className="border rounded-lg p-4 bg-white">
                           <ScrollArea className="h-72">
-                            <RdrTreeView node={generateMockRdrTree(rule)} />
+                            <RdrTreeView node={generateMockRdrTree()} />
                           </ScrollArea>
                         </div>
                         <div className="flex items-center justify-between text-xs text-gray-500 px-1">
@@ -696,7 +796,10 @@ const RuleDetailDrawer: React.FC<RuleDetailDrawerProps> = ({
                             <span>6 leaf nodes</span>
                             <span>Depth 4</span>
                           </div>
-                          <span>Last trained: {new Date(rule.lastModified).toLocaleDateString()}</span>
+                          <span>
+                            Last trained:{" "}
+                            {new Date(rule.lastModified).toLocaleDateString()}
+                          </span>
                         </div>
                       </>
                     )}
@@ -708,13 +811,16 @@ const RuleDetailDrawer: React.FC<RuleDetailDrawerProps> = ({
                           <Network className="h-4 w-4" />
                           Knowledge Graph
                         </div>
-                        <KgGraphView graph={generateMockKgGraph(rule)} />
+                        <KgGraphView graph={generateMockKgGraph()} />
                         <div className="flex items-center justify-between text-xs text-gray-500 px-1">
                           <div className="flex items-center gap-4">
                             <span>7 nodes</span>
                             <span>6 edges</span>
                           </div>
-                          <span>Last trained: {new Date(rule.lastModified).toLocaleDateString()}</span>
+                          <span>
+                            Last trained:{" "}
+                            {new Date(rule.lastModified).toLocaleDateString()}
+                          </span>
                         </div>
                       </>
                     )}
@@ -728,19 +834,27 @@ const RuleDetailDrawer: React.FC<RuleDetailDrawerProps> = ({
                         </div>
                         <div className="grid grid-cols-4 gap-3">
                           <div className="p-4 bg-blue-50 rounded-lg text-center">
-                            <p className="text-2xl font-bold text-blue-600">90.5%</p>
+                            <p className="text-2xl font-bold text-blue-600">
+                              90.5%
+                            </p>
                             <p className="text-xs text-gray-600">Accuracy</p>
                           </div>
                           <div className="p-4 bg-green-50 rounded-lg text-center">
-                            <p className="text-2xl font-bold text-green-600">0.87</p>
+                            <p className="text-2xl font-bold text-green-600">
+                              0.87
+                            </p>
                             <p className="text-xs text-gray-600">F1 Score</p>
                           </div>
                           <div className="p-4 bg-purple-50 rounded-lg text-center">
-                            <p className="text-2xl font-bold text-purple-600">0.93</p>
+                            <p className="text-2xl font-bold text-purple-600">
+                              0.93
+                            </p>
                             <p className="text-xs text-gray-600">AUROC</p>
                           </div>
                           <div className="p-4 bg-amber-50 rounded-lg text-center">
-                            <p className="text-2xl font-bold text-amber-600">42ms</p>
+                            <p className="text-2xl font-bold text-amber-600">
+                              42ms
+                            </p>
                             <p className="text-xs text-gray-600">Latency P50</p>
                           </div>
                         </div>
@@ -753,20 +867,32 @@ const RuleDetailDrawer: React.FC<RuleDetailDrawerProps> = ({
                         </div>
                         <div className="border rounded-lg p-4 bg-gray-50 space-y-3">
                           <div className="flex justify-between">
-                            <span className="text-sm text-gray-600">Architecture</span>
-                            <span className="text-sm font-medium">Transformer + Metadata Head</span>
+                            <span className="text-sm text-gray-600">
+                              Architecture
+                            </span>
+                            <span className="text-sm font-medium">
+                              Transformer + Metadata Head
+                            </span>
                           </div>
                           <div className="flex justify-between">
-                            <span className="text-sm text-gray-600">Parameters</span>
+                            <span className="text-sm text-gray-600">
+                              Parameters
+                            </span>
                             <span className="text-sm font-medium">48M</span>
                           </div>
                           <div className="flex justify-between">
-                            <span className="text-sm text-gray-600">Training Samples</span>
+                            <span className="text-sm text-gray-600">
+                              Training Samples
+                            </span>
                             <span className="text-sm font-medium">98,000</span>
                           </div>
                           <div className="flex justify-between">
-                            <span className="text-sm text-gray-600">Last Trained</span>
-                            <span className="text-sm font-medium">{new Date(rule.lastModified).toLocaleDateString()}</span>
+                            <span className="text-sm text-gray-600">
+                              Last Trained
+                            </span>
+                            <span className="text-sm font-medium">
+                              {new Date(rule.lastModified).toLocaleDateString()}
+                            </span>
                           </div>
                         </div>
                       </>
