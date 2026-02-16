@@ -452,7 +452,7 @@ async def client_message(
     
     # Manual mode
     await message_queue.add_message(client_msg)
-    
+
     event_data = {
         "type": "client_message",
         "message_id": message_id,
@@ -467,7 +467,7 @@ async def client_message(
             }
         }
     }
-    
+
     print(f"[CLIENT] New message {message_id}: {req.message[:50]}...")
     await event_bus.publish(event_data)
 
@@ -483,7 +483,47 @@ async def client_message(
         print(f"[CLIENT] Stored hitlRequest event: {initial_prov.event_id}")
     except Exception as e:
         print(f"[CLIENT] Error storing hitlRequest event: {e}")
-    
+
+    # ========== Input Policy Pre-evaluation (background, non-blocking) ==========
+    async def _run_input_policy_eval() -> None:
+        from services.policy_engine import policy_engine
+        try:
+            print(f"[CLIENT-MANUAL] Evaluating input policies for {message_id}...")
+            input_eval = await policy_engine.evaluate_content(
+                content=req.message,
+                policy_type="input",
+                context={"history": [h.model_dump() for h in req.history] if req.history else []}
+            )
+            input_eval_data = {
+                "decision": input_eval.decision,
+                "passed": input_eval.passed,
+                "violations": [v.model_dump() for v in input_eval.violations],
+                "summary": input_eval.summary,
+                "evaluation_time_ms": input_eval.evaluation_time_ms,
+                "evaluated_policies": input_eval.evaluated_policies,
+            }
+            await message_queue.store_policy_evaluation(message_id, "input", input_eval_data)
+            print(f"[CLIENT-MANUAL] Input policy result: {input_eval.decision}")
+
+            await event_bus.publish({
+                "type": "policy_evaluation",
+                "trace_id": trace_id,
+                "ts": int(time.time() * 1000),
+                "data": {
+                    "message_id": message_id,
+                    "policy_type": "input",
+                    "decision": input_eval.decision,
+                    "passed": input_eval.passed,
+                    "violations": [v.model_dump() for v in input_eval.violations],
+                    "summary": input_eval.summary,
+                    "evaluation_time_ms": input_eval.evaluation_time_ms
+                }
+            })
+        except Exception as e:
+            print(f"[CLIENT-MANUAL] Error evaluating input policies: {e}")
+
+    asyncio.create_task(_run_input_policy_eval())
+
     return {
         "message_id": message_id,
         "trace_id": trace_id,

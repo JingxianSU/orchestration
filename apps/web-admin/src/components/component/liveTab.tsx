@@ -23,6 +23,8 @@ import {
   ArrowUpRight,
   FileText,
   ChevronRight,
+  ShieldAlert,
+  ShieldCheck,
 } from "lucide-react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Switch } from "@/components/ui/switch";
@@ -59,6 +61,30 @@ type ChatTrace = {
   payload: unknown;
 };
 
+type PolicyViolationItem = {
+  policy_id: string;
+  policy_name: string;
+  rule_id: string;
+  rule_name: string;
+  severity: string;
+  reason: string;
+  suggestion?: string;
+  // Extended fields for detailed display
+  rule_description?: string;
+  rule_content?: string;
+  source_document?: string;
+  source_section?: string;
+};
+
+type PolicyEvaluation = {
+  decision: string;
+  passed: boolean;
+  violations: PolicyViolationItem[];
+  summary: string;
+  evaluation_time_ms: number;
+  evaluated_policies: number;
+};
+
 type HITLRequest = {
   message_id: string;
   trace_id: string;
@@ -66,6 +92,7 @@ type HITLRequest = {
   history?: Array<{ role: string; content: string }>;
   meta?: Record<string, unknown>;
   timestamp: number;
+  policyEvaluation?: PolicyEvaluation | null;
 };
 
 function safeStringify(value: unknown): string {
@@ -189,6 +216,7 @@ interface LiveTabProps {
     llmResponse: string;
     effectiveMessage: string;
     adminPrompt: string;
+    outputPolicyEvaluation?: PolicyEvaluation | null;
   } | null;
   onCloseSecondaryReview: () => void;
   onHandleSecondaryReject: (errorCode: string, reason: string) => Promise<void>;
@@ -426,6 +454,135 @@ function JsonDisplay({ content }: { content: string }) {
       </div>
     );
   }
+}
+
+function PolicyEvaluationAlert({
+  evaluation,
+  label,
+}: {
+  evaluation: PolicyEvaluation;
+  label: string;
+}) {
+  const isBlock = evaluation.decision === "BLOCK";
+  const isWarn = evaluation.decision === "WARN";
+  const isPass = evaluation.decision === "ALLOW";
+
+  return (
+    <div
+      className={[
+        "rounded-lg border p-3 space-y-2",
+        isBlock
+          ? "border-red-500/50 bg-red-500/10"
+          : isWarn
+            ? "border-yellow-500/50 bg-yellow-500/10"
+            : "border-green-500/50 bg-green-500/10",
+      ].join(" ")}
+    >
+      <div className="flex items-center gap-2">
+        {isPass ? (
+          <ShieldCheck className="h-4 w-4 text-green-400" />
+        ) : (
+          <ShieldAlert
+            className={`h-4 w-4 ${isBlock ? "text-red-400" : "text-yellow-400"}`}
+          />
+        )}
+        <span className="text-sm font-medium">{label}</span>
+        <Badge
+          className={
+            isBlock
+              ? "bg-red-500 text-white"
+              : isWarn
+                ? "bg-yellow-500 text-black"
+                : "bg-green-500 text-white"
+          }
+        >
+          {evaluation.decision}
+        </Badge>
+        <span className="text-xs text-muted-foreground ml-auto">
+          {evaluation.evaluation_time_ms}ms
+        </span>
+      </div>
+
+      {evaluation.summary && (
+        <p className="text-sm text-muted-foreground">{evaluation.summary}</p>
+      )}
+
+      {evaluation.violations.length > 0 && (
+        <div className="space-y-2">
+          {evaluation.violations.map((v, idx) => (
+            <div
+              key={idx}
+              className={[
+                "rounded px-3 py-2.5 text-xs",
+                v.severity === "block"
+                  ? "bg-red-500/20 border border-red-500/30"
+                  : v.severity === "warn"
+                    ? "bg-yellow-500/20 border border-yellow-500/30"
+                    : "bg-blue-500/20 border border-blue-500/30",
+              ].join(" ")}
+            >
+              {/* Header: Severity + Rule Name */}
+              <div className="flex items-center gap-2 mb-1.5">
+                <Badge
+                  variant="outline"
+                  className={`text-[10px] px-1 py-0 ${
+                    v.severity === "block"
+                      ? "text-red-300 border-red-500/40"
+                      : v.severity === "warn"
+                        ? "text-yellow-300 border-yellow-500/40"
+                        : "text-blue-300 border-blue-500/40"
+                  }`}
+                >
+                  {v.severity.toUpperCase()}
+                </Badge>
+                <span className="font-medium">{v.rule_name}</span>
+                <span className="text-muted-foreground text-[10px] ml-auto">
+                  Policy: {v.policy_name}
+                </span>
+              </div>
+
+              {/* Description */}
+              {v.rule_description && (
+                <p className="text-muted-foreground mb-1">
+                  <span className="font-medium text-foreground/80">Description:</span> {v.rule_description}
+                </p>
+              )}
+
+              {/* Rule Content */}
+              {v.rule_content && (
+                <p className="text-muted-foreground mb-1">
+                  <span className="font-medium text-foreground/80">Rule:</span> {v.rule_content}
+                </p>
+              )}
+
+              {/* Source */}
+              {(v.source_document || v.source_section) && (
+                <p className="text-muted-foreground mb-1">
+                  <span className="font-medium text-foreground/80">Source:</span>{" "}
+                  {v.source_document}
+                  {v.source_section && ` (${v.source_section})`}
+                </p>
+              )}
+
+              {/* Reason (AI evaluation result) */}
+              <div className="mt-2 pt-2 border-t border-current/10">
+                <p className="text-muted-foreground">
+                  <span className="font-medium text-foreground/80">Violation:</span> {v.reason}
+                </p>
+              </div>
+
+              {/* Suggestion */}
+              {v.suggestion && (
+                <p className="text-muted-foreground mt-1.5 italic bg-black/10 rounded px-2 py-1">
+                  💡 Suggestion: {v.suggestion}
+                </p>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
 }
 
 export function LiveTab({
@@ -737,7 +894,6 @@ export function LiveTab({
   const isMessageApproved = traceType === "message_approved";
   const isHitlDecision = traceType === "hitl_decision";
   const isPolicyEvaluation = traceType === "policy_evaluation";
-  void isPolicyEvaluation;
   const messageApprovedData = isMessageApproved
     ? {
         original_message: tryGet(selectedPayload, ["original_message"]),
@@ -802,6 +958,13 @@ export function LiveTab({
                     ))}
                   </div>
                 </div>
+              )}
+
+              {currentHitl.policyEvaluation && (
+                <PolicyEvaluationAlert
+                  evaluation={currentHitl.policyEvaluation}
+                  label="Input Policy Check"
+                />
               )}
 
               <div className="rounded-lg bg-muted p-3">
@@ -968,6 +1131,14 @@ export function LiveTab({
 
           {secondaryReview && (
             <div className="space-y-4">
+              {/* Output Policy Evaluation Alert */}
+              {secondaryReview.outputPolicyEvaluation && (
+                <PolicyEvaluationAlert
+                  evaluation={secondaryReview.outputPolicyEvaluation}
+                  label="Output Policy Check"
+                />
+              )}
+
               {/* User Message (Effective) */}
               <div className="rounded-lg bg-muted p-3">
                 <div className="text-sm font-medium mb-2">
@@ -1827,6 +1998,89 @@ export function LiveTab({
                 </TabsContent>
               </Tabs>
             )}
+
+            {/* ── Policy Evaluation Detail ── */}
+            {isPolicyEvaluation && (() => {
+              const pe = selectedPayload as any;
+              const isBlock = pe.decision === "BLOCK";
+              const isWarn = pe.decision === "WARN";
+
+              return (
+                <div className="space-y-4 mt-2">
+                  {/* Summary header */}
+                  <div className={[
+                    "rounded-lg border p-3 space-y-2",
+                    isBlock ? "border-red-500/50 bg-red-500/10"
+                      : isWarn ? "border-yellow-500/50 bg-yellow-500/10"
+                      : "border-green-500/50 bg-green-500/10"
+                  ].join(" ")}>
+                    <div className="flex items-center gap-2">
+                      {pe.passed ? (
+                        <ShieldCheck className="h-4 w-4 text-green-400" />
+                      ) : (
+                        <ShieldAlert className={`h-4 w-4 ${isBlock ? "text-red-400" : "text-yellow-400"}`} />
+                      )}
+                      <span className="text-sm font-medium capitalize">{pe.policy_type} Policy Check</span>
+                      <Badge className={
+                        isBlock ? "bg-red-500 text-white"
+                          : isWarn ? "bg-yellow-500 text-black"
+                          : "bg-green-500 text-white"
+                      }>
+                        {pe.decision}
+                      </Badge>
+                      {pe.evaluation_time_ms != null && (
+                        <span className="text-xs text-muted-foreground ml-auto">{pe.evaluation_time_ms}ms</span>
+                      )}
+                    </div>
+                    {pe.summary && <p className="text-sm text-muted-foreground">{pe.summary}</p>}
+                  </div>
+
+                  {/* Violations list */}
+                  {pe.violations && pe.violations.length > 0 && (
+                    <div className="space-y-2">
+                      <div className="text-sm font-medium">Violations ({pe.violations.length})</div>
+                      {pe.violations.map((v: any, idx: number) => (
+                        <div key={idx} className={[
+                          "rounded-lg border p-3 space-y-1.5",
+                          v.severity === "block" ? "border-red-500/30 bg-red-500/5"
+                            : v.severity === "warn" ? "border-yellow-500/30 bg-yellow-500/5"
+                            : "border-blue-500/30 bg-blue-500/5"
+                        ].join(" ")}>
+                          <div className="flex items-center gap-2">
+                            <Badge variant="outline" className={`text-[10px] px-1.5 py-0 ${
+                              v.severity === "block" ? "text-red-300 border-red-500/40"
+                                : v.severity === "warn" ? "text-yellow-300 border-yellow-500/40"
+                                : "text-blue-300 border-blue-500/40"
+                            }`}>
+                              {(v.severity || "info").toUpperCase()}
+                            </Badge>
+                            <span className="text-sm font-medium">{v.rule_name || v.rule_id}</span>
+                          </div>
+                          {v.policy_name && (
+                            <div className="text-xs text-muted-foreground">Policy: {v.policy_name}</div>
+                          )}
+                          <p className="text-sm">{v.reason}</p>
+                          {v.suggestion && (
+                            <p className="text-xs text-muted-foreground italic">Suggestion: {v.suggestion}</p>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* Metadata */}
+                  <JsonPanel title="Metadata" data={{
+                    trace_id: pe.trace_id,
+                    message_id: pe.message_id,
+                    policy_type: pe.policy_type,
+                    decision: pe.decision,
+                    passed: pe.passed,
+                    evaluation_time_ms: pe.evaluation_time_ms,
+                    violations_count: pe.violations?.length ?? 0,
+                  }} />
+                </div>
+              );
+            })()}
           </CardContent>
         </Card>
       </div>

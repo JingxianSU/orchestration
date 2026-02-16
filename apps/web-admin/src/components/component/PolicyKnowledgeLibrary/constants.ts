@@ -391,6 +391,151 @@ export const MOCK_RULES: Rule[] = [
     trustWorthy: "other",
     changeLog: [],
   },
+  // ===== AU Psychology / Clinical rules (append) =====
+  {
+    id: "RS-AU-PSY-PRIVACY-001",
+    title: "Psychology Notes: Privacy & Minimum Necessary Use",
+    summary:
+      "Clinical psychology notes and client health information must be collected/used/disclosed only as necessary; restrict access and avoid unnecessary sharing/export.",
+    domain: ["healthcare"],
+    jurisdiction: ["au"],
+    intentType: "data_handling",
+    scope: "org",
+    enforcement: "pre_check",
+    strength: "must",
+    action: "redact",
+    source: [
+      {
+        type: "regulation",
+        reference:
+          "Privacy Act 1988 (Cth) + Australian Privacy Principles (APPs)",
+      },
+      { type: "internal", reference: "Clinical Record Handling SOP v1.0" },
+    ],
+    inferenceModel: "rdr",
+    owner: "Clinical Governance",
+    version: "1.0.0",
+    status: "active",
+    lastModified: "2026-02-11T00:00:00Z",
+    riskLevel: "high",
+    trustWorthy: "explain",
+    changeLog: [],
+  },
+  {
+    id: "RS-AU-PSY-MANDATORY-NOTIF-001",
+    title: "Mandatory Notification Workflow (AHPRA/National Law)",
+    summary:
+      "Where mandatory notification obligations may be triggered, the system must route the case to a registered clinician/supervisor and log the rationale and evidence trail.",
+    domain: ["healthcare", "government"],
+    jurisdiction: ["au"],
+    intentType: "incident",
+    scope: "org",
+    enforcement: "in_flight",
+    strength: "must",
+    action: "require_approval",
+    source: [
+      {
+        type: "regulation",
+        reference:
+          "National Law (AHPRA) – Mandatory notifications (mandatory reporting)",
+      },
+      { type: "internal", reference: "Mandatory Notification Playbook v1.2" },
+    ],
+    inferenceModel: "knowledge_graph",
+    owner: "Clinical Director",
+    version: "1.0.0",
+    status: "active",
+    lastModified: "2026-02-11T00:00:00Z",
+    riskLevel: "critical",
+    trustWorthy: "interpretation",
+    changeLog: [],
+  },
+  {
+    id: "RS-AU-PSY-TELEHEALTH-001",
+    title: "Telehealth Delivery: Consent, Identity, and Environment Checks",
+    summary:
+      "Before telehealth psychology sessions, confirm client identity, location (for emergency response), consent, and privacy environment; otherwise pause and escalate to clinician guidance.",
+    domain: ["healthcare"],
+    jurisdiction: ["au"],
+    intentType: "operational",
+    scope: "session",
+    enforcement: "pre_check",
+    strength: "should",
+    action: "require_approval",
+    source: [
+      {
+        type: "standard",
+        reference:
+          "APS Telehealth considerations (Better Access / service delivery guidance)",
+      },
+      { type: "internal", reference: "Telehealth Session Checklist v2.0" },
+    ],
+    inferenceModel: "neural_network",
+    owner: "Service Delivery Lead",
+    version: "1.0.0",
+    status: "active",
+    lastModified: "2026-02-11T00:00:00Z",
+    riskLevel: "high",
+    trustWorthy: "explain",
+    changeLog: [],
+  },
+  {
+    id: "RS-AU-PSY-MHR-001",
+    title: "My Health Record Access Controls",
+    summary:
+      "If the service participates in My Health Record, access must be role-based and logged; any export must follow participation obligations and security controls.",
+    domain: ["healthcare"],
+    jurisdiction: ["au"],
+    intentType: "access_control",
+    scope: "org",
+    enforcement: "post_check",
+    strength: "must",
+    action: "log",
+    source: [
+      {
+        type: "standard",
+        reference: "My Health Record participation obligations (ADHA)",
+      },
+      { type: "internal", reference: "MHR Access & Audit Policy v1.0" },
+    ],
+    inferenceModel: "rdr",
+    owner: "Security & Privacy",
+    version: "1.0.0",
+    status: "draft",
+    lastModified: "2026-02-11T00:00:00Z",
+    riskLevel: "high",
+    trustWorthy: "other",
+    changeLog: [],
+  },
+  {
+    id: "RS-AU-PSY-NDIS-001",
+    title: "NDIS Code of Conduct Compliance",
+    summary:
+      "When providing NDIS-funded supports, interactions must meet NDIS Code of Conduct and safeguarding requirements; suspicious events must be escalated and recorded.",
+    domain: ["healthcare", "government"],
+    jurisdiction: ["au"],
+    intentType: "compliance",
+    scope: "org",
+    enforcement: "in_flight",
+    strength: "must",
+    action: "require_approval",
+    source: [
+      {
+        type: "regulation",
+        reference:
+          "NDIS Code of Conduct (NDIS Quality & Safeguards Commission)",
+      },
+      { type: "internal", reference: "NDIS Service Governance SOP v1.0" },
+    ],
+    inferenceModel: "knowledge_graph",
+    owner: "NDIS Practice Lead",
+    version: "1.0.0",
+    status: "active",
+    lastModified: "2026-02-11T00:00:00Z",
+    riskLevel: "high",
+    trustWorthy: "case",
+    changeLog: [],
+  },
 ];
 
 // ============ Knowledge Asset Types ============
@@ -1383,16 +1528,487 @@ export const KB_NN_ASSETS: NeuralNetAsset[] = [
   },
 ];
 
-// ============ KB -> Assets mapping (ONLY 3 KBs are simulated) ============
+// ===== Psychology AU KBs (simulated 3 KBs: RDR/KG/NN) =====
+const KB_PSY_RDR = "RS-AU-PSY-PRIVACY-001";
+const KB_PSY_KG = "RS-AU-PSY-MANDATORY-NOTIF-001";
+const KB_PSY_NN = "RS-AU-PSY-TELEHEALTH-001";
+
+// --- RDR asset (privacy/minimum necessary) ---
+export const KB_PSY_RDR_ASSETS: RdrAsset[] = [
+  {
+    id: "ASSET-RDR-PSY-NOTES-REDACT-01",
+    kbId: KB_PSY_RDR,
+    type: "rdr",
+    title: "Psychology notes redaction & sharing gate (v1.0)",
+    summary:
+      "Redacts highly sensitive note fields by default; blocks external share unless explicit approval & purpose is documented.",
+    tags: ["healthcare", "data_handling", "notes", "redact", "pre_check"],
+    riskLevel: "high",
+    evidence: [
+      {
+        type: "regulation",
+        reference: "Privacy Act 1988 (Cth) + APPs",
+        locator: "APP 3/6/11",
+        excerpt: "Collect/use/disclose only as needed; protect information.",
+      },
+      {
+        type: "internal",
+        reference: "Clinical Record Handling SOP v1.0",
+        locator: "Section 4",
+        excerpt:
+          "Default redact & restrict sharing; require documented purpose.",
+      },
+    ],
+    provenance: {
+      assetId: "ASSET-RDR-PSY-NOTES-REDACT-01",
+      name: "Psych Notes Gate",
+      type: "rdr",
+      version: "1.0.0",
+      owner: "Clinical Governance",
+      lastTrainedAt: "2026-02-11T00:00:00Z",
+      dataset: {
+        name: "NoteSharing-Decisions",
+        version: "2026.02",
+        size: 5400,
+      },
+      build: {
+        pipelineId: "pipe_rdr_psy_0101",
+        gitCommit: "psy001",
+        environment: "staging",
+      },
+    },
+    eval: {
+      coverage: 0.9,
+      accuracy: 0.95,
+      f1: 0.9,
+      latencyMsP50: 5,
+      latencyMsP95: 15,
+    },
+    tree: {
+      rootId: "p0",
+      nodes: {
+        nodeId: "p0",
+        label: "Root",
+        stats: {
+          supportCount: 5400,
+          exceptionCount: 0,
+          precision: 1,
+          lastUpdated: "2026-02-11",
+          updatedBy: "clinical.gov@org",
+        },
+        evidenceRefs: [],
+        children: [
+          {
+            nodeId: "p1",
+            label: "Request involves psychology notes?",
+            condition: { field: "dataType", op: "eq", value: "psych_notes" },
+            stats: {
+              supportCount: 2100,
+              exceptionCount: 12,
+              precision: 0.96,
+              lastUpdated: "2026-02-11",
+              updatedBy: "clinical.gov@org",
+            },
+            evidenceRefs: [
+              "Privacy Act 1988 (Cth) + APPs",
+              "Clinical Record Handling SOP v1.0",
+            ],
+            children: [
+              {
+                nodeId: "p2",
+                label: "Is external sharing requested?",
+                condition: {
+                  field: "shareTarget",
+                  op: "neq",
+                  value: "internal",
+                },
+                stats: {
+                  supportCount: 680,
+                  exceptionCount: 8,
+                  precision: 0.93,
+                  lastUpdated: "2026-02-11",
+                  updatedBy: "privacy@org",
+                },
+                evidenceRefs: ["Privacy Act 1988 (Cth) + APPs"],
+                children: [
+                  {
+                    nodeId: "p3",
+                    label: "Has documented purpose + approval?",
+                    condition: { field: "hasApproval", op: "eq", value: true },
+                    stats: {
+                      supportCount: 220,
+                      exceptionCount: 2,
+                      precision: 0.95,
+                      lastUpdated: "2026-02-11",
+                      updatedBy: "privacy@org",
+                    },
+                    evidenceRefs: ["Clinical Record Handling SOP v1.0"],
+                    children: [
+                      {
+                        nodeId: "p3a",
+                        label: "REDACT & ALLOW share",
+                        conclusion: {
+                          action: "redact",
+                          reason:
+                            "External share permitted only with approval; sensitive fields redacted by default.",
+                        },
+                        stats: {
+                          supportCount: 220,
+                          exceptionCount: 0,
+                          precision: 0.96,
+                          lastUpdated: "2026-02-11",
+                          updatedBy: "privacy@org",
+                        },
+                        evidenceRefs: ["Privacy Act 1988 (Cth) + APPs"],
+                      },
+                    ],
+                  },
+                  {
+                    nodeId: "p4",
+                    label: "No approval → DENY",
+                    conclusion: {
+                      action: "deny",
+                      reason:
+                        "External sharing of psychology notes requires documented purpose and approval.",
+                    },
+                    stats: {
+                      supportCount: 460,
+                      exceptionCount: 0,
+                      precision: 0.94,
+                      lastUpdated: "2026-02-11",
+                      updatedBy: "privacy@org",
+                    },
+                    evidenceRefs: ["Privacy Act 1988 (Cth) + APPs"],
+                  },
+                ],
+              },
+              {
+                nodeId: "p5",
+                label: "Internal use → REDACT",
+                conclusion: {
+                  action: "redact",
+                  reason:
+                    "Minimum necessary: show only required fields for internal workflow.",
+                },
+                stats: {
+                  supportCount: 1420,
+                  exceptionCount: 0,
+                  precision: 0.96,
+                  lastUpdated: "2026-02-11",
+                  updatedBy: "clinical.gov@org",
+                },
+                evidenceRefs: ["Clinical Record Handling SOP v1.0"],
+              },
+            ],
+          },
+        ],
+      },
+    },
+    sampleInference: {
+      input: {
+        requestId: "req_psy_001",
+        dataType: "psych_notes",
+        shareTarget: "external",
+        hasApproval: false,
+      },
+      matchedPath: ["p0", "p1", "p2", "p4"],
+      finalDecision: {
+        action: "deny",
+        reason:
+          "External sharing of psychology notes requires documented purpose and approval.",
+      },
+      explanation: [
+        "dataType = psych_notes → apply psychology note handling",
+        "shareTarget != internal → external sharing route",
+        "hasApproval = false → deny",
+        "Evidence: Privacy Act 1988 (Cth) + APPs",
+      ],
+    },
+  },
+];
+
+// --- KG asset (mandatory notification workflow) ---
+export const KB_PSY_KG_ASSETS: KgAsset[] = [
+  {
+    id: "ASSET-KG-PSY-MANDATORY-NOTIF-01",
+    kbId: KB_PSY_KG,
+    type: "knowledge_graph",
+    title: "Mandatory notification decision graph (AU)",
+    summary:
+      "Maps potential triggers → required escalation steps → logging requirements for clinician review.",
+    tags: ["au", "incident", "governance", "mandatory_notification"],
+    riskLevel: "critical",
+    evidence: [
+      {
+        type: "regulation",
+        reference: "National Law (AHPRA) – Mandatory notifications",
+        locator: "Guidance",
+        excerpt: "Certain circumstances require notification to the regulator.",
+      },
+      {
+        type: "internal",
+        reference: "Mandatory Notification Playbook v1.2",
+        locator: "Section 2-4",
+        excerpt:
+          "Escalate to registered clinician; record rationale and actions.",
+      },
+    ],
+    provenance: {
+      assetId: "ASSET-KG-PSY-MANDATORY-NOTIF-01",
+      name: "Mandatory Notification KG",
+      type: "knowledge_graph",
+      version: "1.0.0",
+      owner: "Clinical Director",
+      lastTrainedAt: "2026-02-11T00:00:00Z",
+      dataset: {
+        name: "PolicyExtracts+CasePatterns",
+        version: "2026.02",
+        size: 180,
+      },
+      build: {
+        pipelineId: "pipe_kg_psy_0201",
+        gitCommit: "psykg01",
+        environment: "prod",
+      },
+    },
+    eval: { coverage: 0.7, accuracy: 0.9, latencyMsP50: 20, latencyMsP95: 60 },
+    graph: {
+      nodes: [
+        { id: "c0", kind: "Concept", label: "Potential notification trigger" },
+        {
+          id: "c1",
+          kind: "Concept",
+          label: "Escalate to registered clinician",
+        },
+        {
+          id: "c2",
+          kind: "Concept",
+          label: "Record rationale & evidence trail",
+        },
+        {
+          id: "g0",
+          kind: "Guideline",
+          label: "AHPRA mandatory notifications guidance",
+          tags: ["au"],
+        },
+        {
+          id: "r0",
+          kind: "Rule",
+          label: "Route to clinician + log",
+          properties: { enforcement: "in_flight" },
+        },
+        {
+          id: "case0",
+          kind: "Case",
+          label: "Case: potential notifiable conduct",
+          properties: { jurisdiction: "au" },
+        },
+      ],
+      edges: [
+        {
+          id: "e1",
+          from: "r0",
+          to: "g0",
+          predicate: "derived_from",
+          weight: 0.8,
+          evidenceRefs: ["National Law (AHPRA) – Mandatory notifications"],
+        },
+        {
+          id: "e2",
+          from: "case0",
+          to: "c0",
+          predicate: "maps_to",
+          weight: 0.7,
+        },
+        {
+          id: "e3",
+          from: "r0",
+          to: "c1",
+          predicate: "requires",
+          weight: 0.9,
+          evidenceRefs: ["Mandatory Notification Playbook v1.2"],
+        },
+        {
+          id: "e4",
+          from: "r0",
+          to: "c2",
+          predicate: "requires",
+          weight: 0.85,
+          evidenceRefs: ["Mandatory Notification Playbook v1.2"],
+        },
+        {
+          id: "e5",
+          from: "g0",
+          to: "c1",
+          predicate: "supports",
+          weight: 0.75,
+          evidenceRefs: ["National Law (AHPRA) – Mandatory notifications"],
+        },
+      ],
+    },
+    sampleInference: {
+      query:
+        "A case may trigger mandatory notification. What must the system do?",
+      returnedSubgraph: {
+        nodeIds: ["case0", "c0", "r0", "c1", "c2", "g0"],
+        edgeIds: ["e2", "e1", "e3", "e4", "e5"],
+      },
+      topPaths: [
+        {
+          path: ["case0", "c0", "r0", "c1", "c2", "g0"],
+          score: 0.86,
+          naturalLanguage:
+            "Potential trigger → apply rule → escalate to registered clinician and record rationale/evidence based on AU guidance and internal playbook.",
+          evidenceRefs: [
+            "National Law (AHPRA) – Mandatory notifications",
+            "Mandatory Notification Playbook v1.2",
+          ],
+        },
+      ],
+    },
+  },
+];
+
+// --- NN asset (telehealth pre-check classifier: readiness/risk) ---
+export const KB_PSY_NN_ASSETS: NeuralNetAsset[] = [
+  {
+    id: "ASSET-NN-PSY-TELEHEALTH-READY-01",
+    kbId: KB_PSY_NN,
+    type: "neural_network",
+    title: "Telehealth readiness & escalation classifier",
+    summary:
+      "Flags sessions that are missing identity/location/consent/environment checks and routes to clinician confirmation.",
+    tags: ["telehealth", "operational", "pre_check", "routing"],
+    riskLevel: "high",
+    evidence: [
+      {
+        type: "standard",
+        reference: "APS Telehealth considerations",
+        locator: "Service delivery",
+        excerpt:
+          "Confirm consent, privacy, and practical safety considerations for telehealth delivery.",
+      },
+      {
+        type: "internal",
+        reference: "Telehealth Session Checklist v2.0",
+        locator: "Checklist",
+        excerpt:
+          "Identity/location/consent/environment checks must be completed before session.",
+      },
+    ],
+    provenance: {
+      assetId: "ASSET-NN-PSY-TELEHEALTH-READY-01",
+      name: "Telehealth Readiness",
+      type: "neural_network",
+      version: "1.0.0",
+      owner: "Service Delivery Lead",
+      lastTrainedAt: "2026-02-11T00:00:00Z",
+      dataset: {
+        name: "Telehealth-QA-Labels",
+        version: "2026.02",
+        size: 24000,
+      },
+      build: {
+        pipelineId: "pipe_nn_psy_0301",
+        gitCommit: "psynn01",
+        environment: "staging",
+      },
+    },
+    eval: {
+      accuracy: 0.89,
+      f1: 0.84,
+      auroc: 0.92,
+      calibrationEce: 0.07,
+      latencyMsP50: 35,
+      latencyMsP95: 110,
+    },
+    model: {
+      architecture: "Transformer + Checklist head",
+      inputSchema: [
+        "sessionText",
+        "hasIdentityCheck",
+        "hasLocation",
+        "hasConsent",
+        "hasPrivacyEnv",
+      ],
+      outputLabels: ["ready", "needs_clinician_confirm"],
+      paramsM: 22,
+    },
+    training: {
+      epochs: 6,
+      bestEpoch: 5,
+      loss: {
+        train: [0.68, 0.54, 0.45, 0.39, 0.36, 0.35],
+        val: [0.7, 0.56, 0.48, 0.42, 0.39, 0.4],
+      },
+      metricsByEpoch: [
+        { epoch: 1, valF1: 0.72, valAuroc: 0.86 },
+        { epoch: 3, valF1: 0.8, valAuroc: 0.9 },
+        { epoch: 5, valF1: 0.84, valAuroc: 0.92 },
+      ],
+    },
+    evaluationArtifacts: {
+      confusionMatrix: {
+        labels: ["ready", "needs_clinician_confirm"],
+        matrix: [
+          [9800, 620],
+          [910, 12670],
+        ],
+      },
+      sliceMetrics: [
+        { sliceName: "AU telehealth", count: 24000, f1: 0.84, auroc: 0.92 },
+      ],
+    },
+    sampleInference: {
+      input: {
+        sessionText:
+          "Client joins from a new device; consent not yet confirmed.",
+        hasIdentityCheck: true,
+        hasLocation: false,
+        hasConsent: false,
+        hasPrivacyEnv: true,
+      },
+      output: [
+        { label: "needs_clinician_confirm", probability: 0.86 },
+        { label: "ready", probability: 0.14 },
+      ],
+      explanation: {
+        method: "shap",
+        topContributors: [
+          { feature: "hasConsent=false", contribution: 0.36 },
+          { feature: "hasLocation=false", contribution: 0.28 },
+          { feature: "new_device_text", contribution: 0.12 },
+        ],
+        naturalLanguage: [
+          "Consent not confirmed increases escalation likelihood.",
+          "Location is required to support emergency response planning if needed.",
+        ],
+      },
+    },
+  },
+];
+
 export const KB_TO_ASSET_IDS: Record<string, string[]> = {
   [KB_RDR]: KB_RDR_ASSETS.map((a) => a.id),
   [KB_KG]: KB_KG_ASSETS.map((a) => a.id),
   [KB_NN]: KB_NN_ASSETS.map((a) => a.id),
+
+  [KB_PSY_RDR]: KB_PSY_RDR_ASSETS.map((a) => a.id),
+  [KB_PSY_KG]: KB_PSY_KG_ASSETS.map((a) => a.id),
+  [KB_PSY_NN]: KB_PSY_NN_ASSETS.map((a) => a.id),
 };
 
 // ============ Asset registry ============
 export const ASSET_REGISTRY: Record<string, AnyAsset> = Object.fromEntries(
-  [...KB_RDR_ASSETS, ...KB_KG_ASSETS, ...KB_NN_ASSETS].map((a) => [a.id, a]),
+  [
+    ...KB_RDR_ASSETS,
+    ...KB_KG_ASSETS,
+    ...KB_NN_ASSETS,
+
+    ...KB_PSY_RDR_ASSETS,
+    ...KB_PSY_KG_ASSETS,
+    ...KB_PSY_NN_ASSETS,
+  ].map((a) => [a.id, a]),
 );
 
 // ============ Training Config Defaults ============

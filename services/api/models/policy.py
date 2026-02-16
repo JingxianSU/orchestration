@@ -21,6 +21,9 @@ class PolicyRule(BaseModel):
     content: str  # The actual policy text/rule
     severity: Literal["block", "warn", "info"] = "block"
     enabled: bool = True
+    # Source traceability
+    source_document: Optional[str] = None
+    source_section: Optional[str] = None
 
 
 class Policy(BaseModel):
@@ -70,6 +73,11 @@ class PolicyViolation(BaseModel):
     severity: Literal["block", "warn", "info"]
     reason: str
     suggestion: Optional[str] = None
+    # Extended fields for detailed display
+    rule_description: Optional[str] = None
+    rule_content: Optional[str] = None
+    source_document: Optional[str] = None
+    source_section: Optional[str] = None
 
 
 class PolicyEvaluationResult(BaseModel):

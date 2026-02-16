@@ -14,6 +14,16 @@ OrchSessionId = str
 OrchTraceId = str
 
 
+class PolicyViolationRef(BaseModel):
+    """Reference to a breached policy rule."""
+    policy_name: str
+    rule_name: str
+    severity: str
+    reason: str
+    suggestion: Optional[str] = None
+    source: Optional[str] = None
+
+
 class Citation(BaseModel):
     """Citation/reference information for decisions."""
     reason: str
@@ -21,6 +31,7 @@ class Citation(BaseModel):
     reviewer: Optional[str] = None
     timestamp: Optional[str] = None
     decision_type: Optional[str] = None
+    policy_violations: Optional[List[PolicyViolationRef]] = None
 
 
 class ProvEvent(BaseModel):

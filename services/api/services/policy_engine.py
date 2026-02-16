@@ -37,20 +37,33 @@ class PolicyEngine:
             return
         
         async with self._lock:
-            # Add default policies
-            self._policies[DEFAULT_INPUT_POLICY.id] = DEFAULT_INPUT_POLICY
-            self._policies[DEFAULT_OUTPUT_POLICY.id] = DEFAULT_OUTPUT_POLICY
-            self._policies[DEFAULT_SYSTEM_POLICY.id] = DEFAULT_SYSTEM_POLICY
-            
-            # Load custom policies from file if exists
+            # First, try to load custom policies from file
             await self._load_policies_from_file()
+            
+            # Only add default policies if no custom policies were loaded for that type
+            has_custom_input = any(p.type == "input" for p in self._policies.values())
+            has_custom_output = any(p.type == "output" for p in self._policies.values())
+            has_custom_system = any(p.type == "system" for p in self._policies.values())
+            
+            if not has_custom_input:
+                self._policies[DEFAULT_INPUT_POLICY.id] = DEFAULT_INPUT_POLICY
+                print("[POLICY-ENGINE] Using default input policy (no custom input policy found)")
+            
+            if not has_custom_output:
+                self._policies[DEFAULT_OUTPUT_POLICY.id] = DEFAULT_OUTPUT_POLICY
+                print("[POLICY-ENGINE] Using default output policy (no custom output policy found)")
+            
+            if not has_custom_system:
+                self._policies[DEFAULT_SYSTEM_POLICY.id] = DEFAULT_SYSTEM_POLICY
+                print("[POLICY-ENGINE] Using default system policy (no custom system policy found)")
             
             self._initialized = True
             print(f"[POLICY-ENGINE] Initialized with {len(self._policies)} policies")
     
-    async def _load_policies_from_file(self) -> None:
-        """Load policies from JSON file."""
+    async def _load_policies_from_file(self) -> bool:
+        """Load policies from JSON file. Returns True if any policies were loaded."""
         policy_file = os.getenv("POLICY_FILE", "policies.json")
+        loaded_count = 0
         if os.path.exists(policy_file):
             try:
                 with open(policy_file, "r") as f:
@@ -58,9 +71,13 @@ class PolicyEngine:
                     for p in data.get("policies", []):
                         policy = Policy(**p)
                         self._policies[policy.id] = policy
-                print(f"[POLICY-ENGINE] Loaded policies from {policy_file}")
+                        loaded_count += 1
+                print(f"[POLICY-ENGINE] Loaded {loaded_count} policies from {policy_file}")
             except Exception as e:
                 print(f"[POLICY-ENGINE] Error loading policies: {e}")
+        else:
+            print(f"[POLICY-ENGINE] No policy file found at {policy_file}")
+        return loaded_count > 0
     
     async def _save_policies_to_file(self) -> None:
         """Save policies to JSON file."""
@@ -293,7 +310,12 @@ Be strict but fair. Only report actual violations, not potential concerns."""
                                 rule_name=rule.name,
                                 severity=v.get("severity", rule.severity),
                                 reason=v.get("reason", "Policy violation detected"),
-                                suggestion=v.get("suggestion")
+                                suggestion=v.get("suggestion"),
+                                # Extended fields from rule
+                                rule_description=rule.description,
+                                rule_content=rule.content,
+                                source_document=getattr(rule, 'source_document', None),
+                                source_section=getattr(rule, 'source_section', None)
                             ))
                             break
                 

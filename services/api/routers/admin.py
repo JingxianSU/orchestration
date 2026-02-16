@@ -219,6 +219,49 @@ async def admin_decide(
             except Exception as e:
                 print(f"[ADMIN] Error storing LLM result to provenance: {e}")
 
+            # ========== Output Policy Evaluation ==========
+            output_eval_data = None
+            try:
+                from services.policy_engine import policy_engine
+                print(f"[ADMIN] Evaluating output policies for {message_id}...")
+                output_eval = await policy_engine.evaluate_content(
+                    content=chat_response.reply,
+                    policy_type="output",
+                    context={
+                        "original_message": final_message,
+                        "history": [h.model_dump() for h in (msg.history or [])] if msg and msg.history else []
+                    }
+                )
+                output_eval_data = {
+                    "decision": output_eval.decision,
+                    "passed": output_eval.passed,
+                    "violations": [v.model_dump() for v in output_eval.violations],
+                    "summary": output_eval.summary,
+                    "evaluation_time_ms": output_eval.evaluation_time_ms,
+                    "evaluated_policies": output_eval.evaluated_policies,
+                }
+                # Store in message queue
+                await message_queue.store_policy_evaluation(message_id, "output", output_eval_data)
+                print(f"[ADMIN] Output policy result: {output_eval.decision}")
+
+                # Publish output policy evaluation event
+                await event_bus.publish({
+                    "type": "policy_evaluation",
+                    "trace_id": resp.trace_id,
+                    "ts": int(time.time() * 1000),
+                    "data": {
+                        "message_id": message_id,
+                        "policy_type": "output",
+                        "decision": output_eval.decision,
+                        "passed": output_eval.passed,
+                        "violations": [v.model_dump() for v in output_eval.violations],
+                        "summary": output_eval.summary,
+                        "evaluation_time_ms": output_eval.evaluation_time_ms
+                    }
+                })
+            except Exception as e:
+                print(f"[ADMIN] Error evaluating output policies: {e}")
+
             llm_response_data = {
                 "trace_id": resp.trace_id,
                 "message_id": message_id,
@@ -246,7 +289,8 @@ async def admin_decide(
                 "status": "awaiting_secondary_review",
                 "message_id": message_id,
                 "llm_response": chat_response.reply,
-                "trace_id": resp.trace_id
+                "trace_id": resp.trace_id,
+                "output_policy_evaluation": output_eval_data,
             }
 
         except Exception as e:
@@ -292,12 +336,34 @@ async def admin_secondary_review(
             user_message=effective_message,
             chat_response=cached_chat_response,
         )
+    # Build citation with policy violation info if present
+    from models.provenance import PolicyViolationRef
+    policy_violation_refs = None
+    output_eval = await message_queue.get_policy_evaluation(message_id, "output")
+    if output_eval and output_eval.get("violations"):
+        policy_violation_refs = [
+            PolicyViolationRef(
+                policy_name=v.get("policy_name", ""),
+                rule_name=v.get("rule_name", ""),
+                severity=v.get("severity", ""),
+                reason=v.get("reason", ""),
+                suggestion=v.get("suggestion"),
+                source=v.get("policy_id"),
+            )
+            for v in output_eval["violations"]
+        ]
+
+    citation_reason = review.reject_reason or "LLM response reviewed"
+    if policy_violation_refs and review.action in ("APPROVE", "EDIT"):
+        citation_reason = f"Approved with policy warnings: {output_eval.get('summary', '')}"
+
     citation = review.citation or Citation(
-        reason=review.reject_reason or "LLM response reviewed",
+        reason=citation_reason,
         references=None,
         reviewer="admin",
         timestamp=iso_utc_now(),
-        decision_type=f"secondary_{review.action.lower()}"
+        decision_type=f"secondary_{review.action.lower()}",
+        policy_violations=policy_violation_refs,
     )
 
     if review.action == "REJECT":
@@ -452,6 +518,18 @@ async def admin_secondary_review(
         return {"status": "completed", "message_id": message_id}
 
     raise HTTPException(status_code=400, detail="Invalid action")
+
+
+@router.get("/policy-evaluation/{message_id}")
+async def get_policy_evaluation(
+    message_id: str,
+    policy_type: str | None = None,
+) -> Dict[str, Any]:
+    """Get stored policy evaluation results for a message."""
+    result = await message_queue.get_policy_evaluation(message_id, policy_type)
+    if result is None:
+        return {"message_id": message_id, "policy_evaluation": None}
+    return {"message_id": message_id, "policy_evaluation": result}
 
 
 @router.post("/regenerate/{message_id}")

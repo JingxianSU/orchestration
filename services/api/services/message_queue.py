@@ -4,7 +4,7 @@ Message queue for managing client messages and responses.
 from __future__ import annotations
 
 import asyncio
-from typing import Dict, Optional
+from typing import Any, Dict, Optional
 
 from models.client import ClientMessage, ClientResponse
 from models.chat import ChatResponse
@@ -12,11 +12,12 @@ from models.chat import ChatResponse
 
 class MessageQueue:
     """In-memory message queue for HITL workflow."""
-    
+
     def __init__(self) -> None:
         self._messages: Dict[str, ClientMessage] = {}
         self._responses: Dict[str, ClientResponse] = {}
         self._chat_responses: Dict[str, ChatResponse] = {}
+        self._policy_evaluations: Dict[str, Dict] = {}  # message_id -> {input: ..., output: ...}
         self._lock = asyncio.Lock()
 
     async def add_message(self, msg: ClientMessage) -> None:
@@ -54,6 +55,27 @@ class MessageQueue:
         async with self._lock:
             return self._chat_responses.get(message_id)
 
+    async def store_policy_evaluation(
+        self, message_id: str, policy_type: str, evaluation: Dict
+    ) -> None:
+        """Store policy evaluation result for a message."""
+        async with self._lock:
+            if message_id not in self._policy_evaluations:
+                self._policy_evaluations[message_id] = {}
+            self._policy_evaluations[message_id][policy_type] = evaluation
+
+    async def get_policy_evaluation(
+        self, message_id: str, policy_type: Optional[str] = None
+    ) -> Optional[Dict]:
+        """Get policy evaluation results for a message."""
+        async with self._lock:
+            evals = self._policy_evaluations.get(message_id)
+            if not evals:
+                return None
+            if policy_type:
+                return evals.get(policy_type)
+            return evals
+
     async def remove_message(self, message_id: str) -> None:
         """Remove message and all related data."""
         async with self._lock:
@@ -63,6 +85,8 @@ class MessageQueue:
                 del self._responses[message_id]
             if message_id in self._chat_responses:
                 del self._chat_responses[message_id]
+            if message_id in self._policy_evaluations:
+                del self._policy_evaluations[message_id]
 
 
 # Singleton instance
