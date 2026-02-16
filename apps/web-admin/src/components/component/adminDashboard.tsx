@@ -15,6 +15,23 @@ type ChatTrace = {
   payload: unknown;
 };
 
+type PolicyEvaluation = {
+  decision: string;
+  passed: boolean;
+  violations: Array<{
+    policy_id: string;
+    policy_name: string;
+    rule_id: string;
+    rule_name: string;
+    severity: string;
+    reason: string;
+    suggestion?: string;
+  }>;
+  summary: string;
+  evaluation_time_ms: number;
+  evaluated_policies: number;
+};
+
 type HITLRequest = {
   message_id: string;
   trace_id: string;
@@ -22,6 +39,7 @@ type HITLRequest = {
   history?: Array<{ role: string; content: string }>;
   meta?: Record<string, unknown>;
   timestamp: number;
+  policyEvaluation?: PolicyEvaluation | null;
 };
 
 function StatChip({ label, value }: { label: string; value: string }) {
@@ -125,6 +143,7 @@ export function AdminDashboard({
     llmResponse: string;
     effectiveMessage: string;
     adminPrompt: string;
+    outputPolicyEvaluation?: PolicyEvaluation | null;
   } | null>(null);
   const [editedContent, setEditedContent] = React.useState<string>("");
   const [editedAdminPrompt, setEditedAdminPrompt] = React.useState<string>("");
@@ -190,6 +209,57 @@ export function AdminDashboard({
             const next = [item, ...prev];
             return next.slice(0, 300);
           });
+        }
+
+        if (parsed.type === "policy_evaluation") {
+          const policyTrace: ChatTrace = {
+            id: `policy-${parsed.data.message_id}-${parsed.data.policy_type}-${parsed.ts}`,
+            createdAt: parsed.ts,
+            payload: {
+              type: "policy_evaluation",
+              trace_id: parsed.trace_id,
+              message_id: parsed.data.message_id,
+              policy_type: parsed.data.policy_type,
+              decision: parsed.data.decision,
+              passed: parsed.data.passed,
+              violations: parsed.data.violations,
+              summary: parsed.data.summary,
+              evaluation_time_ms: parsed.data.evaluation_time_ms,
+            },
+          };
+
+          setTraces((prev) => {
+            const exists = prev.some((t) => t.id === policyTrace.id);
+            if (exists) return prev;
+            const next = [policyTrace, ...prev];
+            return next.slice(0, 300);
+          });
+
+          // Attach input policy result to matching HITL request
+          if (parsed.data.policy_type === "input") {
+            const evalData: PolicyEvaluation = {
+              decision: parsed.data.decision,
+              passed: parsed.data.passed,
+              violations: parsed.data.violations || [],
+              summary: parsed.data.summary || "",
+              evaluation_time_ms: parsed.data.evaluation_time_ms || 0,
+              evaluated_policies: parsed.data.evaluated_policies || 0,
+            };
+            const targetMsgId = parsed.data.message_id;
+
+            setCurrentHitl((prev) =>
+              prev && prev.message_id === targetMsgId
+                ? { ...prev, policyEvaluation: evalData }
+                : prev,
+            );
+            setHitlQueue((prev) =>
+              prev.map((r) =>
+                r.message_id === targetMsgId
+                  ? { ...r, policyEvaluation: evalData }
+                  : r,
+              ),
+            );
+          }
         }
 
         if (parsed.type === "llm_response_ready") {
@@ -317,6 +387,7 @@ export function AdminDashboard({
           llmResponse: result.llm_response,
           effectiveMessage: effectiveMsg,
           adminPrompt: adminPromptValue,
+          outputPolicyEvaluation: result.output_policy_evaluation || null,
         });
         setEditedContent(result.llm_response);
         setEditedAdminPrompt(adminPromptValue);

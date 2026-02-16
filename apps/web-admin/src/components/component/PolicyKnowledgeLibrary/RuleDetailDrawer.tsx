@@ -32,25 +32,53 @@ import { Separator } from "@/components/ui/separator";
 import { cn } from "@/lib/utils";
 
 import type { Rule, FilterOptions } from "./types";
-import { getIconComponent, getRiskColor, getActionColor } from "./constants";
+import {
+  getIconComponent,
+  getRiskColor,
+  getActionColor,
+  KB_RDR_ASSETS,
+  KB_KG_ASSETS,
+  KB_NN_ASSETS,
+  KB_PSY_RDR_ASSETS,
+  KB_PSY_KG_ASSETS,
+  KB_PSY_NN_ASSETS,
+  type RdrAsset,
+  type KgAsset,
+  type NeuralNetAsset,
+  type RdrNode,
+} from "./constants";
 import ModelTrainingDialog from "./training/ModelTrainingDialog";
 
-interface RdrTreeNode {
-  id: string;
-  label: string;
-  condition?: string;
-  conclusion?: { action: string; reason: string };
-  children?: RdrTreeNode[];
-  stats?: { support: number; precision: number };
+// ============ Helper to find assets by rule ID ============
+const ALL_RDR_ASSETS = [...KB_RDR_ASSETS, ...KB_PSY_RDR_ASSETS];
+const ALL_KG_ASSETS = [...KB_KG_ASSETS, ...KB_PSY_KG_ASSETS];
+const ALL_NN_ASSETS = [...KB_NN_ASSETS, ...KB_PSY_NN_ASSETS];
+
+function getRdrAssetForRule(ruleId: string): RdrAsset | null {
+  return ALL_RDR_ASSETS.find((a) => a.kbId === ruleId) || null;
 }
 
-const RdrTreeView: React.FC<{ node: RdrTreeNode; depth?: number }> = ({
+function getKgAssetForRule(ruleId: string): KgAsset | null {
+  return ALL_KG_ASSETS.find((a) => a.kbId === ruleId) || null;
+}
+
+function getNnAssetForRule(ruleId: string): NeuralNetAsset | null {
+  return ALL_NN_ASSETS.find((a) => a.kbId === ruleId) || null;
+}
+
+// Use the RdrNode type from constants.ts for actual asset data
+const RdrTreeView: React.FC<{ node: RdrNode; depth?: number }> = ({
   node,
   depth = 0,
 }) => {
   const [expanded, setExpanded] = useState(depth < 2);
   const hasChildren = node.children && node.children.length > 0;
   const isLeaf = !!node.conclusion;
+
+  // Format condition for display
+  const conditionDisplay = node.condition
+    ? `${node.condition.field} ${node.condition.op} ${JSON.stringify(node.condition.value)}`
+    : null;
 
   return (
     <div className="select-none">
@@ -73,9 +101,9 @@ const RdrTreeView: React.FC<{ node: RdrTreeNode; depth?: number }> = ({
         <span className={`text-sm ${isLeaf ? "font-medium" : ""}`}>
           {node.label}
         </span>
-        {node.condition && (
+        {conditionDisplay && (
           <code className="text-xs bg-gray-100 px-1.5 py-0.5 rounded text-gray-600">
-            {node.condition}
+            {conditionDisplay}
           </code>
         )}
         {node.conclusion && (
@@ -87,15 +115,15 @@ const RdrTreeView: React.FC<{ node: RdrTreeNode; depth?: number }> = ({
         )}
         {node.stats && (
           <span className="text-xs text-gray-400 ml-auto">
-            {node.stats.support} cases •{" "}
-            {(node.stats.precision * 100).toFixed(0)}%
+            {node.stats.supportCount} cases •{" "}
+            {((node.stats.precision || 0) * 100).toFixed(0)}%
           </span>
         )}
       </div>
       {expanded && hasChildren && (
         <div>
           {node.children!.map((child) => (
-            <RdrTreeView key={child.id} node={child} depth={depth + 1} />
+            <RdrTreeView key={child.nodeId} node={child} depth={depth + 1} />
           ))}
         </div>
       )}
@@ -103,21 +131,16 @@ const RdrTreeView: React.FC<{ node: RdrTreeNode; depth?: number }> = ({
   );
 };
 
-interface KgGraphData {
-  nodes: {
-    id: string;
-    label: string;
-    type: "concept" | "rule" | "entity" | "evidence";
-  }[];
-  edges: { from: string; to: string; label: string }[];
-}
-
-const KgGraphView: React.FC<{ graph: KgGraphData }> = ({ graph }) => {
+// Use actual KgAsset graph structure
+const KgGraphView: React.FC<{ asset: KgAsset }> = ({ asset }) => {
+  const graph = asset.graph;
+  
   const nodeColors: Record<string, string> = {
-    concept: "bg-blue-100 border-blue-400 text-blue-700",
-    rule: "bg-green-100 border-green-400 text-green-700",
-    entity: "bg-purple-100 border-purple-400 text-purple-700",
-    evidence: "bg-amber-100 border-amber-400 text-amber-700",
+    Concept: "bg-blue-100 border-blue-400 text-blue-700",
+    Rule: "bg-green-100 border-green-400 text-green-700",
+    Entity: "bg-purple-100 border-purple-400 text-purple-700",
+    Guideline: "bg-amber-100 border-amber-400 text-amber-700",
+    Case: "bg-pink-100 border-pink-400 text-pink-700",
   };
 
   const positions: Record<string, { x: number; y: number }> = {};
@@ -145,7 +168,7 @@ const KgGraphView: React.FC<{ graph: KgGraphData }> = ({ graph }) => {
           const midX = (from.x + to.x) / 2;
           const midY = (from.y + to.y) / 2;
           return (
-            <g key={i}>
+            <g key={edge.id || i}>
               <line
                 x1={from.x}
                 y1={from.y}
@@ -162,7 +185,7 @@ const KgGraphView: React.FC<{ graph: KgGraphData }> = ({ graph }) => {
                 className="fill-gray-500"
                 fontSize={9}
               >
-                {edge.label}
+                {edge.predicate}
               </text>
             </g>
           );
@@ -185,7 +208,7 @@ const KgGraphView: React.FC<{ graph: KgGraphData }> = ({ graph }) => {
         return (
           <div
             key={node.id}
-            className={`absolute px-2 py-1 rounded-lg border-2 text-xs font-medium shadow-sm ${nodeColors[node.type]}`}
+            className={`absolute px-2 py-1 rounded-lg border-2 text-xs font-medium shadow-sm ${nodeColors[node.kind] || "bg-gray-100 border-gray-400 text-gray-700"}`}
             style={{
               left: pos.x - 35,
               top: pos.y - 10,
@@ -201,7 +224,7 @@ const KgGraphView: React.FC<{ graph: KgGraphData }> = ({ graph }) => {
         {Object.entries(nodeColors).map(([type, cls]) => (
           <div key={type} className="flex items-center gap-1">
             <div className={`w-3 h-3 rounded border ${cls}`} />
-            <span className="text-gray-600 capitalize">{type}</span>
+            <span className="text-gray-600">{type}</span>
           </div>
         ))}
       </div>
@@ -209,89 +232,28 @@ const KgGraphView: React.FC<{ graph: KgGraphData }> = ({ graph }) => {
   );
 };
 
-const generateMockRdrTree = (): RdrTreeNode => ({
-  id: "root",
-  label: "Root",
-  children: [
-    {
-      id: "n1",
-      label: "Contains PII?",
-      condition: "containsPII == true",
-      stats: { support: 6240, precision: 0.98 },
-      children: [
-        {
-          id: "n2",
-          label: "Jurisdiction Check",
-          condition: "jurisdiction in ['AU', 'EU']",
-          stats: { support: 3120, precision: 0.96 },
-          children: [
-            {
-              id: "n3",
-              label: "Has Approval?",
-              condition: "hasApproval == true",
-              stats: { support: 980, precision: 0.99 },
-              children: [
-                {
-                  id: "n3a",
-                  label: "ALLOW",
-                  conclusion: {
-                    action: "allow",
-                    reason: "Approved PII export",
-                  },
-                  stats: { support: 980, precision: 0.99 },
-                },
-              ],
-            },
-            {
-              id: "n4",
-              label: "REQUIRE APPROVAL",
-              conclusion: {
-                action: "require_approval",
-                reason: "Needs explicit approval",
-              },
-              stats: { support: 2140, precision: 0.94 },
-            },
-          ],
-        },
-        {
-          id: "n5",
-          label: "DENY",
-          conclusion: {
-            action: "deny",
-            reason: "Outside approved jurisdictions",
-          },
-          stats: { support: 3120, precision: 0.98 },
-        },
-      ],
-    },
-    {
-      id: "n6",
-      label: "ALLOW",
-      conclusion: { action: "allow", reason: "No PII detected" },
-      stats: { support: 12000, precision: 0.97 },
-    },
-  ],
-});
+// Helper to count tree nodes for stats display
+function countRdrTreeNodes(node: RdrNode): {
+  total: number;
+  maxDepth: number;
+  leaves: number;
+} {
+  let total = 1;
+  let leaves = 0;
+  let maxDepth = 0;
 
-const generateMockKgGraph = (): KgGraphData => ({
-  nodes: [
-    { id: "c1", label: "Medical Diagnosis", type: "concept" },
-    { id: "c2", label: "FDA Approval", type: "concept" },
-    { id: "c3", label: "TGA Compliance", type: "concept" },
-    { id: "r1", label: "Requires Approval", type: "rule" },
-    { id: "e1", label: "AI Model X", type: "entity" },
-    { id: "ev1", label: "FDA 21 CFR", type: "evidence" },
-    { id: "ev2", label: "TGA Standards", type: "evidence" },
-  ],
-  edges: [
-    { from: "c1", to: "r1", label: "requires" },
-    { from: "r1", to: "c2", label: "needs" },
-    { from: "r1", to: "c3", label: "needs" },
-    { from: "e1", to: "c1", label: "used_for" },
-    { from: "c2", to: "ev1", label: "defined_by" },
-    { from: "c3", to: "ev2", label: "defined_by" },
-  ],
-});
+  if (!node.children || node.children.length === 0) {
+    leaves = 1;
+  } else {
+    for (const child of node.children) {
+      const childStats = countRdrTreeNodes(child);
+      total += childStats.total;
+      leaves += childStats.leaves;
+      maxDepth = Math.max(maxDepth, childStats.maxDepth + 1);
+    }
+  }
+  return { total, maxDepth, leaves };
+}
 
 // ============ Rule Detail Drawer Component ============
 interface RuleDetailDrawerProps {
@@ -779,124 +741,211 @@ const RuleDetailDrawer: React.FC<RuleDetailDrawerProps> = ({
                   {/* Model Visualization */}
                   <div className="space-y-4">
                     {/* RDR Tree Visualization */}
-                    {rule.inferenceModel === "rdr" && (
-                      <>
-                        <div className="flex items-center gap-2 text-sm font-medium text-gray-700">
-                          <GitBranch className="h-4 w-4" />
-                          Decision Tree
-                        </div>
-                        <div className="border rounded-lg p-4 bg-white">
-                          <ScrollArea className="h-72">
-                            <RdrTreeView node={generateMockRdrTree()} />
-                          </ScrollArea>
-                        </div>
-                        <div className="flex items-center justify-between text-xs text-gray-500 px-1">
-                          <div className="flex items-center gap-4">
-                            <span>8 rules</span>
-                            <span>6 leaf nodes</span>
-                            <span>Depth 4</span>
+                    {rule.inferenceModel === "rdr" && (() => {
+                      const rdrAsset = getRdrAssetForRule(rule.id);
+                      if (!rdrAsset) {
+                        return (
+                          <div className="text-center py-8 bg-gray-50 rounded-lg">
+                            <Database className="h-8 w-8 text-gray-400 mx-auto mb-2" />
+                            <p className="text-sm text-gray-500">No RDR model trained for this rule yet</p>
+                            <p className="text-xs text-gray-400 mt-1">Click "Train Model" to create one</p>
                           </div>
-                          <span>
-                            Last trained:{" "}
-                            {new Date(rule.lastModified).toLocaleDateString()}
-                          </span>
-                        </div>
-                      </>
-                    )}
+                        );
+                      }
+                      const treeStats = countRdrTreeNodes(rdrAsset.tree.nodes);
+                      return (
+                        <>
+                          <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-2 text-sm font-medium text-gray-700">
+                              <GitBranch className="h-4 w-4" />
+                              Decision Tree: {rdrAsset.title}
+                            </div>
+                            <Badge variant="outline" className="text-xs">v{rdrAsset.provenance.version}</Badge>
+                          </div>
+                          <p className="text-xs text-gray-500">{rdrAsset.summary}</p>
+                          <div className="border rounded-lg p-4 bg-white">
+                            <ScrollArea className="h-72">
+                              <RdrTreeView node={rdrAsset.tree.nodes} />
+                            </ScrollArea>
+                          </div>
+                          <div className="flex items-center justify-between text-xs text-gray-500 px-1">
+                            <div className="flex items-center gap-4">
+                              <span>{treeStats.total} rules</span>
+                              <span>{treeStats.leaves} leaf nodes</span>
+                              <span>Depth {treeStats.maxDepth}</span>
+                            </div>
+                            <span>
+                              Last trained:{" "}
+                              {new Date(rdrAsset.provenance.lastTrainedAt).toLocaleDateString()}
+                            </span>
+                          </div>
+                          {/* Eval metrics */}
+                          <div className="grid grid-cols-4 gap-3 mt-4">
+                            <div className="p-3 bg-blue-50 rounded-lg text-center">
+                              <p className="text-xl font-bold text-blue-600">{((rdrAsset.eval.coverage || 0) * 100).toFixed(0)}%</p>
+                              <p className="text-xs text-gray-600">Coverage</p>
+                            </div>
+                            <div className="p-3 bg-green-50 rounded-lg text-center">
+                              <p className="text-xl font-bold text-green-600">{((rdrAsset.eval.accuracy || 0) * 100).toFixed(0)}%</p>
+                              <p className="text-xs text-gray-600">Accuracy</p>
+                            </div>
+                            <div className="p-3 bg-purple-50 rounded-lg text-center">
+                              <p className="text-xl font-bold text-purple-600">{(rdrAsset.eval.f1 || 0).toFixed(2)}</p>
+                              <p className="text-xs text-gray-600">F1 Score</p>
+                            </div>
+                            <div className="p-3 bg-amber-50 rounded-lg text-center">
+                              <p className="text-xl font-bold text-amber-600">{rdrAsset.eval.latencyMsP50 || 0}ms</p>
+                              <p className="text-xs text-gray-600">Latency P50</p>
+                            </div>
+                          </div>
+                        </>
+                      );
+                    })()}
 
                     {/* Knowledge Graph Visualization */}
-                    {rule.inferenceModel === "knowledge_graph" && (
-                      <>
-                        <div className="flex items-center gap-2 text-sm font-medium text-gray-700">
-                          <Network className="h-4 w-4" />
-                          Knowledge Graph
-                        </div>
-                        <KgGraphView graph={generateMockKgGraph()} />
-                        <div className="flex items-center justify-between text-xs text-gray-500 px-1">
-                          <div className="flex items-center gap-4">
-                            <span>7 nodes</span>
-                            <span>6 edges</span>
+                    {rule.inferenceModel === "knowledge_graph" && (() => {
+                      const kgAsset = getKgAssetForRule(rule.id);
+                      if (!kgAsset) {
+                        return (
+                          <div className="text-center py-8 bg-gray-50 rounded-lg">
+                            <Globe className="h-8 w-8 text-gray-400 mx-auto mb-2" />
+                            <p className="text-sm text-gray-500">No Knowledge Graph trained for this rule yet</p>
+                            <p className="text-xs text-gray-400 mt-1">Click "Train Model" to create one</p>
                           </div>
-                          <span>
-                            Last trained:{" "}
-                            {new Date(rule.lastModified).toLocaleDateString()}
-                          </span>
-                        </div>
-                      </>
-                    )}
+                        );
+                      }
+                      return (
+                        <>
+                          <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-2 text-sm font-medium text-gray-700">
+                              <Network className="h-4 w-4" />
+                              Knowledge Graph: {kgAsset.title}
+                            </div>
+                            <Badge variant="outline" className="text-xs">v{kgAsset.provenance.version}</Badge>
+                          </div>
+                          <p className="text-xs text-gray-500">{kgAsset.summary}</p>
+                          <KgGraphView asset={kgAsset} />
+                          <div className="flex items-center justify-between text-xs text-gray-500 px-1">
+                            <div className="flex items-center gap-4">
+                              <span>{kgAsset.graph.nodes.length} nodes</span>
+                              <span>{kgAsset.graph.edges.length} edges</span>
+                            </div>
+                            <span>
+                              Last trained:{" "}
+                              {new Date(kgAsset.provenance.lastTrainedAt).toLocaleDateString()}
+                            </span>
+                          </div>
+                          {/* Eval metrics */}
+                          <div className="grid grid-cols-4 gap-3 mt-4">
+                            <div className="p-3 bg-blue-50 rounded-lg text-center">
+                              <p className="text-xl font-bold text-blue-600">{((kgAsset.eval.coverage || 0) * 100).toFixed(0)}%</p>
+                              <p className="text-xs text-gray-600">Coverage</p>
+                            </div>
+                            <div className="p-3 bg-green-50 rounded-lg text-center">
+                              <p className="text-xl font-bold text-green-600">{((kgAsset.eval.accuracy || 0) * 100).toFixed(0)}%</p>
+                              <p className="text-xs text-gray-600">Accuracy</p>
+                            </div>
+                            <div className="p-3 bg-purple-50 rounded-lg text-center">
+                              <p className="text-xl font-bold text-purple-600">{kgAsset.eval.latencyMsP50 || 0}ms</p>
+                              <p className="text-xs text-gray-600">Latency P50</p>
+                            </div>
+                            <div className="p-3 bg-amber-50 rounded-lg text-center">
+                              <p className="text-xl font-bold text-amber-600">{kgAsset.eval.latencyMsP95 || 0}ms</p>
+                              <p className="text-xs text-gray-600">Latency P95</p>
+                            </div>
+                          </div>
+                        </>
+                      );
+                    })()}
 
                     {/* Neural Network Metrics */}
-                    {rule.inferenceModel === "neural_network" && (
-                      <>
-                        <div className="flex items-center gap-2 text-sm font-medium text-gray-700">
-                          <Cpu className="h-4 w-4" />
-                          Model Performance
-                        </div>
-                        <div className="grid grid-cols-4 gap-3">
-                          <div className="p-4 bg-blue-50 rounded-lg text-center">
-                            <p className="text-2xl font-bold text-blue-600">
-                              90.5%
-                            </p>
-                            <p className="text-xs text-gray-600">Accuracy</p>
+                    {rule.inferenceModel === "neural_network" && (() => {
+                      const nnAsset = getNnAssetForRule(rule.id);
+                      if (!nnAsset) {
+                        return (
+                          <div className="text-center py-8 bg-gray-50 rounded-lg">
+                            <Cpu className="h-8 w-8 text-gray-400 mx-auto mb-2" />
+                            <p className="text-sm text-gray-500">No Neural Network trained for this rule yet</p>
+                            <p className="text-xs text-gray-400 mt-1">Click "Train Model" to create one</p>
                           </div>
-                          <div className="p-4 bg-green-50 rounded-lg text-center">
-                            <p className="text-2xl font-bold text-green-600">
-                              0.87
-                            </p>
-                            <p className="text-xs text-gray-600">F1 Score</p>
+                        );
+                      }
+                      return (
+                        <>
+                          <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-2 text-sm font-medium text-gray-700">
+                              <Cpu className="h-4 w-4" />
+                              Model Performance: {nnAsset.title}
+                            </div>
+                            <Badge variant="outline" className="text-xs">v{nnAsset.provenance.version}</Badge>
                           </div>
-                          <div className="p-4 bg-purple-50 rounded-lg text-center">
-                            <p className="text-2xl font-bold text-purple-600">
-                              0.93
-                            </p>
-                            <p className="text-xs text-gray-600">AUROC</p>
+                          <p className="text-xs text-gray-500">{nnAsset.summary}</p>
+                          <div className="grid grid-cols-4 gap-3">
+                            <div className="p-4 bg-blue-50 rounded-lg text-center">
+                              <p className="text-2xl font-bold text-blue-600">
+                                {((nnAsset.eval.accuracy || 0) * 100).toFixed(1)}%
+                              </p>
+                              <p className="text-xs text-gray-600">Accuracy</p>
+                            </div>
+                            <div className="p-4 bg-green-50 rounded-lg text-center">
+                              <p className="text-2xl font-bold text-green-600">
+                                {(nnAsset.eval.f1 || 0).toFixed(2)}
+                              </p>
+                              <p className="text-xs text-gray-600">F1 Score</p>
+                            </div>
+                            <div className="p-4 bg-purple-50 rounded-lg text-center">
+                              <p className="text-2xl font-bold text-purple-600">
+                                {(nnAsset.eval.auroc || 0).toFixed(2)}
+                              </p>
+                              <p className="text-xs text-gray-600">AUROC</p>
+                            </div>
+                            <div className="p-4 bg-amber-50 rounded-lg text-center">
+                              <p className="text-2xl font-bold text-amber-600">
+                                {nnAsset.eval.latencyMsP50 || 0}ms
+                              </p>
+                              <p className="text-xs text-gray-600">Latency P50</p>
+                            </div>
                           </div>
-                          <div className="p-4 bg-amber-50 rounded-lg text-center">
-                            <p className="text-2xl font-bold text-amber-600">
-                              42ms
-                            </p>
-                            <p className="text-xs text-gray-600">Latency P50</p>
-                          </div>
-                        </div>
 
-                        <Separator />
+                          <Separator />
 
-                        <div className="flex items-center gap-2 text-sm font-medium text-gray-700">
-                          <Cpu className="h-4 w-4" />
-                          Model Architecture
-                        </div>
-                        <div className="border rounded-lg p-4 bg-gray-50 space-y-3">
-                          <div className="flex justify-between">
-                            <span className="text-sm text-gray-600">
-                              Architecture
-                            </span>
-                            <span className="text-sm font-medium">
-                              Transformer + Metadata Head
-                            </span>
+                          <div className="flex items-center gap-2 text-sm font-medium text-gray-700">
+                            <Cpu className="h-4 w-4" />
+                            Model Architecture
                           </div>
-                          <div className="flex justify-between">
-                            <span className="text-sm text-gray-600">
-                              Parameters
-                            </span>
-                            <span className="text-sm font-medium">48M</span>
+                          <div className="border rounded-lg p-4 bg-gray-50 space-y-3">
+                            <div className="flex justify-between">
+                              <span className="text-sm text-gray-600">
+                                Architecture
+                              </span>
+                              <span className="text-sm font-medium">
+                                {nnAsset.model.architecture}
+                              </span>
+                            </div>
+                            <div className="flex justify-between">
+                              <span className="text-sm text-gray-600">
+                                Parameters
+                              </span>
+                              <span className="text-sm font-medium">{nnAsset.model.paramsM}M</span>
+                            </div>
+                            <div className="flex justify-between">
+                              <span className="text-sm text-gray-600">
+                                Training Samples
+                              </span>
+                              <span className="text-sm font-medium">{nnAsset.provenance.dataset?.size?.toLocaleString() || "N/A"}</span>
+                            </div>
+                            <div className="flex justify-between">
+                              <span className="text-sm text-gray-600">
+                                Last Trained
+                              </span>
+                              <span className="text-sm font-medium">
+                                {new Date(nnAsset.provenance.lastTrainedAt).toLocaleDateString()}
+                              </span>
+                            </div>
                           </div>
-                          <div className="flex justify-between">
-                            <span className="text-sm text-gray-600">
-                              Training Samples
-                            </span>
-                            <span className="text-sm font-medium">98,000</span>
-                          </div>
-                          <div className="flex justify-between">
-                            <span className="text-sm text-gray-600">
-                              Last Trained
-                            </span>
-                            <span className="text-sm font-medium">
-                              {new Date(rule.lastModified).toLocaleDateString()}
-                            </span>
-                          </div>
-                        </div>
-                      </>
-                    )}
+                        </>
+                      );
+                    })()}
                   </div>
                 </div>
 

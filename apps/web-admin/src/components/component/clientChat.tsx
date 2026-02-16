@@ -18,12 +18,22 @@ import {
 } from "@/components/ui/hover-card";
 
 type Role = "user" | "assistant";
+type PolicyViolationRef = {
+  policy_name: string;
+  rule_name: string;
+  severity: string;
+  reason: string;
+  suggestion?: string;
+  source?: string;
+};
+
 type Citation = {
   reason: string;
   references?: string[];
   reviewer?: string;
   timestamp?: string;
   decision_type?: string;
+  policy_violations?: PolicyViolationRef[];
 };
 type ChatMessage = {
   id: string;
@@ -74,17 +84,28 @@ function uid(): string {
 }
 
 function CitationHoverCard({ citation }: { citation: Citation }) {
+  const hasViolations =
+    citation.policy_violations && citation.policy_violations.length > 0;
+
   return (
     <HoverCard>
       <HoverCardTrigger asChild>
         <button
-          className="ml-1 inline-flex items-center justify-center w-4 h-4 text-xs opacity-70 hover:opacity-100 transition-opacity"
+          className={[
+            "ml-1 inline-flex items-center justify-center w-4 h-4 text-xs transition-opacity",
+            hasViolations
+              ? "opacity-90 hover:opacity-100 text-yellow-500"
+              : "opacity-70 hover:opacity-100",
+          ].join(" ")}
           aria-label="View citation"
         >
           <Quote className="h-3 w-3" />
         </button>
       </HoverCardTrigger>
-      <HoverCardContent className="w-80" align="start">
+      <HoverCardContent
+        className={hasViolations ? "w-96" : "w-80"}
+        align="start"
+      >
         <div className="space-y-2">
           <div className="text-sm space-y-1">
             <div>
@@ -117,6 +138,58 @@ function CitationHoverCard({ citation }: { citation: Citation }) {
                 </ul>
               </div>
             )}
+
+            {/* Policy Violations */}
+            {hasViolations && (
+              <div className="pt-2 border-t border-yellow-500/30">
+                <span className="font-medium text-yellow-500">
+                  Policy Warnings ({citation.policy_violations!.length})
+                </span>
+                <div className="mt-1.5 space-y-1.5">
+                  {citation.policy_violations!.map((v, idx) => (
+                    <div
+                      key={idx}
+                      className={[
+                        "rounded px-2 py-1.5 text-xs border",
+                        v.severity === "block"
+                          ? "bg-red-500/10 border-red-500/30"
+                          : v.severity === "warn"
+                            ? "bg-yellow-500/10 border-yellow-500/30"
+                            : "bg-blue-500/10 border-blue-500/30",
+                      ].join(" ")}
+                    >
+                      <div className="flex items-center gap-1.5 mb-0.5">
+                        <Badge
+                          variant="outline"
+                          className={`text-[9px] px-1 py-0 ${
+                            v.severity === "block"
+                              ? "text-red-400 border-red-500/40"
+                              : v.severity === "warn"
+                                ? "text-yellow-400 border-yellow-500/40"
+                                : "text-blue-400 border-blue-500/40"
+                          }`}
+                        >
+                          {v.severity.toUpperCase()}
+                        </Badge>
+                        <span className="font-medium">{v.rule_name}</span>
+                      </div>
+                      <p className="text-muted-foreground">{v.reason}</p>
+                      {v.source && (
+                        <p className="text-muted-foreground mt-0.5">
+                          Source: {v.source}
+                        </p>
+                      )}
+                      {v.suggestion && (
+                        <p className="text-muted-foreground mt-0.5 italic">
+                          {v.suggestion}
+                        </p>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
             {citation.timestamp && (
               <div className="text-xs text-muted-foreground pt-1 border-t">
                 {new Date(citation.timestamp).toLocaleString()}
