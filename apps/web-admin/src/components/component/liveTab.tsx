@@ -23,8 +23,8 @@ import {
   ArrowUpRight,
   FileText,
   ChevronRight,
-  ShieldAlert,
   ShieldCheck,
+  ShieldAlert,
 } from "lucide-react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Switch } from "@/components/ui/switch";
@@ -61,6 +61,19 @@ type ChatTrace = {
   payload: unknown;
 };
 
+type HttpLog = {
+  timestamp: number;
+  direction?: string;
+  method?: string;
+  url: string;
+  status_code?: number | string;
+  request_headers?: Record<string, unknown>;
+  response_headers?: Record<string, unknown>;
+  request_body?: string;
+  response_body?: string;
+  trace_id?: string;
+};
+
 type PolicyViolationItem = {
   policy_id: string;
   policy_name: string;
@@ -95,6 +108,9 @@ type HITLRequest = {
   policyEvaluation?: PolicyEvaluation | null;
 };
 
+const ACTIVE_TAB_CLS =
+  "text-muted-foreground data-[state=active]:bg-background data-[state=active]:text-foreground data-[state=active]:font-bold data-[state=active]:shadow-sm";
+
 function safeStringify(value: unknown): string {
   try {
     return JSON.stringify(value, null, 2);
@@ -103,11 +119,23 @@ function safeStringify(value: unknown): string {
   }
 }
 
+/** Safely convert an unknown value to a string safe to render in JSX. */
+function toStr(value: unknown): string {
+  if (typeof value === "string") return value;
+  if (value == null) return "";
+  if (typeof value === "number" || typeof value === "boolean") return String(value);
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return String(value);
+  }
+}
+
 function tryGet(obj: unknown, path: string[]): unknown {
-  let cur: any = obj;
+  let cur: unknown = obj;
   for (const k of path) {
     if (!cur || typeof cur !== "object") return undefined;
-    cur = cur[k];
+    cur = (cur as Record<string, unknown>)[k];
   }
   return cur;
 }
@@ -244,14 +272,35 @@ function LogDetailsDialog({
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  selectedPayload: any;
-  logs: any[];
+  selectedPayload: Record<string, unknown>;
+  logs: HttpLog[];
 }) {
-  const messageId = selectedPayload?.message_id;
+  const messageId = selectedPayload?.message_id as string | undefined;
+  const llmResponse = selectedPayload?.llm_response as Record<string, unknown> | undefined;
+
+  // llmResponse.content is the Claude API content blocks array: [{type:"text", text:"..."}]
+  // Extract the plain text from the first text block, falling back gracefully.
+  const llmResponseText = React.useMemo(() => {
+    if (!llmResponse) return undefined;
+    // If it's a plain string already
+    if (typeof llmResponse === "string") return llmResponse as string;
+    // Claude API envelope: content is an array of blocks
+    const blocks = llmResponse.content;
+    if (Array.isArray(blocks)) {
+      return blocks
+        .filter((b): b is { type: string; text: string } => typeof b === "object" && b !== null && (b as Record<string, unknown>).type === "text")
+        .map((b) => b.text)
+        .join("\n") || undefined;
+    }
+    // Fallback: stringify
+    if (typeof blocks === "string") return blocks;
+    return undefined;
+  }, [llmResponse]);
+
   const messageContent =
-    selectedPayload?.original_message || selectedPayload?.llm_response?.content;
-  const timestamp = selectedPayload?.timestamp;
-  const originalMessage = selectedPayload?.original_message;
+    (selectedPayload?.original_message as string | undefined) || llmResponseText;
+  const timestamp = selectedPayload?.timestamp as string | number | undefined;
+  const originalMessage = selectedPayload?.original_message as string | undefined;
 
   const relatedLogs = React.useMemo(() => {
     if (!selectedPayload) return [];
@@ -317,17 +366,17 @@ function LogDetailsDialog({
         <DialogHeader>
           <DialogTitle>Related HTTP Logs</DialogTitle>
           <DialogDescription className="flex gap-2 flex-wrap">
-            {selectedPayload?.trace_id && (
-              <Badge variant="outline">Trace: {selectedPayload.trace_id}</Badge>
+            {!!selectedPayload?.trace_id && (
+              <Badge variant="outline">Trace: {String(selectedPayload.trace_id)}</Badge>
             )}
-            {selectedPayload?.message_id && (
+            {!!selectedPayload?.message_id && (
               <Badge variant="outline">
-                Message: {selectedPayload.message_id}
+                Message: {String(selectedPayload.message_id)}
               </Badge>
             )}
             {timestamp && (
               <Badge variant="outline">
-                Time: {new Date(timestamp).toLocaleTimeString()}
+                Time: {new Date(timestamp as string | number).toLocaleTimeString()}
               </Badge>
             )}
           </DialogDescription>
@@ -357,7 +406,7 @@ function LogDetailsDialog({
                     )}
                     <Badge
                       variant="outline"
-                      className={`text-xs ${getStatusBadgeClass(log.status_code || 0)}`}
+                      className={`text-xs ${getStatusBadgeClass(String(log.status_code || 0))}`}
                     >
                       {log.method} {log.status_code}
                     </Badge>
@@ -374,11 +423,74 @@ function LogDetailsDialog({
                     <ChevronRight className="h-3 w-3" />
                     View Details
                   </CollapsibleTrigger>
-                  <CollapsibleContent className="mt-2 space-y-2">
+                  <CollapsibleContent className="mt-2 space-y-3">
+                    {/* Request Headers */}
+                    {log.request_headers && Object.keys(log.request_headers).length > 0 && (
+                      <div>
+                        <div className="flex justify-between items-center mb-1">
+                          <p className="text-xs text-muted-foreground font-medium">Request Headers:</p>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-6 px-2"
+                            onClick={() => {
+                              navigator.clipboard.writeText(JSON.stringify(log.request_headers, null, 2));
+                            }}
+                          >
+                            <Copy className="h-3 w-3 mr-1" />
+                            Copy
+                          </Button>
+                        </div>
+                        <div className="rounded bg-muted p-3">
+                          <table className="w-full text-xs font-mono">
+                            <tbody>
+                              {Object.entries(log.request_headers).map(([k, v]) => (
+                                <tr key={k} className="align-top">
+                                  <td className="pr-3 text-muted-foreground whitespace-nowrap py-0.5 w-1/3">{k}</td>
+                                  <td className="break-all py-0.5">{String(v)}</td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
+                    )}
+                    {/* Response Headers */}
+                    {log.response_headers && Object.keys(log.response_headers).length > 0 && (
+                      <div>
+                        <div className="flex justify-between items-center mb-1">
+                          <p className="text-xs text-muted-foreground font-medium">Response Headers:</p>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-6 px-2"
+                            onClick={() => {
+                              navigator.clipboard.writeText(JSON.stringify(log.response_headers, null, 2));
+                            }}
+                          >
+                            <Copy className="h-3 w-3 mr-1" />
+                            Copy
+                          </Button>
+                        </div>
+                        <div className="rounded bg-muted p-3">
+                          <table className="w-full text-xs font-mono">
+                            <tbody>
+                              {Object.entries(log.response_headers).map(([k, v]) => (
+                                <tr key={k} className="align-top">
+                                  <td className="pr-3 text-muted-foreground whitespace-nowrap py-0.5 w-1/3">{k}</td>
+                                  <td className="break-all py-0.5">{String(v)}</td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
+                    )}
+                    {/* Request Body */}
                     {log.request_body && (
                       <div>
                         <div className="flex justify-between items-center mb-1">
-                          <p className="text-xs text-muted-foreground">
+                          <p className="text-xs text-muted-foreground font-medium">
                             Request Body:
                           </p>
                           <Button
@@ -386,7 +498,7 @@ function LogDetailsDialog({
                             size="sm"
                             className="h-6 px-2"
                             onClick={() => {
-                              navigator.clipboard.writeText(log.request_body);
+                              navigator.clipboard.writeText(log.request_body ?? "");
                             }}
                           >
                             <Copy className="h-3 w-3 mr-1" />
@@ -396,10 +508,11 @@ function LogDetailsDialog({
                         <JsonDisplay content={log.request_body} />
                       </div>
                     )}
+                    {/* Response Body */}
                     {log.response_body && (
                       <div>
                         <div className="flex justify-between items-center mb-1">
-                          <p className="text-xs text-muted-foreground">
+                          <p className="text-xs text-muted-foreground font-medium">
                             Response Body:
                           </p>
                           <Button
@@ -407,7 +520,7 @@ function LogDetailsDialog({
                             size="sm"
                             className="h-6 px-2"
                             onClick={() => {
-                              navigator.clipboard.writeText(log.response_body);
+                              navigator.clipboard.writeText(log.response_body ?? "");
                             }}
                           >
                             <Copy className="h-3 w-3 mr-1" />
@@ -435,20 +548,18 @@ function LogDetailsDialog({
 // 添加JSON格式化显示组件
 function JsonDisplay({ content }: { content: string }) {
   try {
-    // 尝试解析JSON
     const jsonData = JSON.parse(content);
     return (
       <div className="rounded bg-muted p-3 relative">
-        <pre className="text-xs overflow-auto max-h-64 font-mono">
+        <pre className="text-xs overflow-auto max-h-64 font-mono whitespace-pre-wrap break-all">
           {JSON.stringify(jsonData, null, 2)}
         </pre>
       </div>
     );
   } catch (e) {
-    // 非JSON内容直接显示
     return (
       <div className="rounded bg-muted p-3">
-        <pre className="text-xs overflow-auto max-h-64 font-mono">
+        <pre className="text-xs overflow-auto max-h-64 font-mono whitespace-pre-wrap break-all">
           {content}
         </pre>
       </div>
@@ -611,9 +722,9 @@ export function LiveTab({
   autoMode,
   onAutoModeChange,
   logs = [],
-}: LiveTabProps & { logs?: any[] }): React.JSX.Element {
+}: LiveTabProps & { logs?: HttpLog[] }): React.JSX.Element {
   const [logDialogOpen, setLogDialogOpen] = React.useState(false);
-  const [logDialogPayload, setLogDialogPayload] = React.useState<any>(null);
+  const [logDialogPayload, setLogDialogPayload] = React.useState<Record<string, unknown> | null>(null);
   const [editableUserMessage, setEditableUserMessage] =
     React.useState<string>("");
   const [adminPrompt, setAdminPrompt] = React.useState<string>("");
@@ -682,7 +793,23 @@ export function LiveTab({
   }, [secondaryReview?.messageId]);
   const renderTraceRow = (t: ChatTrace) => {
     const when = new Date(t.createdAt).toLocaleString();
-    const payload = t.payload as any;
+    const payload = t.payload as {
+      type?: string;
+      trace_id?: string;
+      message_id?: string;
+      reviewer?: string;
+      decision?: string;
+      review_type?: string;
+      error_code?: string;
+      effective_message?: string;
+      original_message?: string;
+      admin_prompt?: string;
+      passed?: boolean;
+      policy_type?: string;
+      summary?: string;
+      evaluation_time_ms?: number;
+      [key: string]: unknown;
+    };
     const isSelected =
       t.id === selectedId ||
       payload?.trace_id === selectedId ||
@@ -729,7 +856,7 @@ export function LiveTab({
             </Badge>
           </div>
           <div className="text-sm text-muted-foreground truncate">
-            {payload.original_message.slice(0, 80)}
+            {payload.original_message?.slice(0, 80)}
           </div>
           <div className="mt-1 flex flex-col gap-1 text-xs text-gray-400">
             <span className="truncate">{when}</span>
@@ -837,18 +964,19 @@ export function LiveTab({
       const decision = payload.decision;
       const passed = payload.passed;
 
+      const policyTypeStr = (policyType ?? "").toUpperCase();
       const badge = passed
         ? {
-            label: `${policyType.toUpperCase()} POLICY: PASS`,
+            label: `${policyTypeStr} POLICY: PASS`,
             className: "bg-green-500 text-white",
           }
         : decision === "BLOCK"
           ? {
-              label: `${policyType.toUpperCase()} POLICY: BLOCKED`,
+              label: `${policyTypeStr} POLICY: BLOCKED`,
               className: "bg-red-500 text-white",
             }
           : {
-              label: `${policyType.toUpperCase()} POLICY: WARN`,
+              label: `${policyTypeStr} POLICY: WARN`,
               className: "bg-yellow-500 text-black",
             };
 
@@ -885,15 +1013,62 @@ export function LiveTab({
       );
     }
 
+    if (payload?.type === "client_message") {
+      return (
+        <button
+          key={t.id}
+          ref={isSelected ? selectedTraceRef : null}
+          onClick={() => onSelectedIdChange(t.id)}
+          className={[
+            "w-full text-left rounded-lg px-3 py-2 border transition-colors",
+            isSelected ? "bg-muted" : "bg-background hover:bg-muted/50",
+          ].join(" ")}
+        >
+          <div className="flex items-center gap-2 mb-1">
+            <span className="text-sm font-medium text-foreground flex-shrink-0">Message:</span>
+            <Badge className="text-xs flex-shrink-0 bg-purple-600 text-white">AUTO</Badge>
+          </div>
+          <div className="text-sm text-muted-foreground truncate">
+            {toStr(payload.message).slice(0, 80)}
+          </div>
+          <div className="mt-1 text-xs text-gray-400 truncate">{when}</div>
+        </button>
+      );
+    }
+
     return null;
   };
 
-  const selectedPayload = selected?.payload ?? {};
-  const traceType = (selectedPayload as any)?.type;
+  const selectedPayload = (selected?.payload ?? {}) as {
+    type?: string;
+    trace_id?: string;
+    message_id?: string;
+    timestamp?: string | number;
+    decision?: string;
+    error_code?: string;
+    reviewer?: string;
+    review_type?: string;
+    reason?: string;
+    original_message?: string;
+    effective_message?: string;
+    admin_prompt?: string;
+    edited_content?: string;
+    approved_content?: string;
+    llm_response?: Record<string, unknown>;
+    policy_type?: string;
+    passed?: boolean;
+    summary?: string;
+    violations?: Record<string, unknown>[];
+    evaluation_time_ms?: number;
+    evaluated_policies?: number;
+    [key: string]: unknown;
+  };
+  const traceType = selectedPayload?.type;
 
   const isMessageApproved = traceType === "message_approved";
   const isHitlDecision = traceType === "hitl_decision";
   const isPolicyEvaluation = traceType === "policy_evaluation";
+  const isClientMessage = traceType === "client_message";
   const messageApprovedData = isMessageApproved
     ? {
         original_message: tryGet(selectedPayload, ["original_message"]),
@@ -911,7 +1086,7 @@ export function LiveTab({
       <LogDetailsDialog
         open={logDialogOpen}
         onOpenChange={setLogDialogOpen}
-        selectedPayload={logDialogPayload}
+        selectedPayload={logDialogPayload ?? {}}
         logs={logs}
       />
 
@@ -1200,7 +1375,7 @@ export function LiveTab({
                   )}
                 </div>
                 <Textarea
-                  value={editedContent}
+                  value={editedContent || secondaryReview.llmResponse}
                   onChange={(e) => {
                     onEditedContentChange(e.target.value);
                     onRegenerateErrorChange("");
@@ -1391,7 +1566,7 @@ export function LiveTab({
                     <TabsTrigger
                       key={v}
                       value={v}
-                      className="text-muted-foreground data-[state=active]:bg-primary data-[state=active]:text-primary-foreground data-[state=active]:shadow-sm"
+                      className={ACTIVE_TAB_CLS}
                     >
                       {v[0].toUpperCase() + v.slice(1)}
                     </TabsTrigger>
@@ -1502,7 +1677,7 @@ export function LiveTab({
                     <TabsTrigger
                       key={v}
                       value={v}
-                      className="text-muted-foreground data-[state=active]:bg-primary data-[state=active]:text-primary-foreground data-[state=active]:shadow-sm"
+                      className={ACTIVE_TAB_CLS}
                     >
                       {v[0].toUpperCase() + v.slice(1)}
                     </TabsTrigger>
@@ -1524,15 +1699,15 @@ export function LiveTab({
                           </div>
                           <div className="flex gap-2">
                             {(() => {
-                              const decision = (selectedPayload as any)
+                              const decision = selectedPayload
                                 .decision;
-                              const errorCode = (selectedPayload as any)
+                              const errorCode = selectedPayload
                                 .error_code;
-                              const editedContent = (selectedPayload as any)
+                              const editedContent = selectedPayload
                                 .edited_content;
                               // 判断是否为人工审核
                               const reviewerLower = (
-                                (selectedPayload as any).reviewer || ""
+                                selectedPayload.reviewer || ""
                               ).toLowerCase();
                               const isHumanReviewer =
                                 !reviewerLower.includes("auto") &&
@@ -1574,9 +1749,9 @@ export function LiveTab({
                                 </Badge>
                               );
                             })()}
-                            {(selectedPayload as any).review_type && (
+                            {selectedPayload.review_type && (
                               <Badge variant="outline">
-                                {(selectedPayload as any).review_type}
+                                {selectedPayload.review_type}
                               </Badge>
                             )}
                           </div>
@@ -1587,39 +1762,39 @@ export function LiveTab({
                             Reviewer
                           </div>
                           <div className="text-sm">
-                            {(selectedPayload as any).reviewer}
+                            {selectedPayload.reviewer}
                           </div>
                         </div>
 
-                        {(selectedPayload as any).reason && (
+                        {selectedPayload.reason && (
                           <div>
                             <div className="text-xs font-medium text-muted-foreground mb-1 flex items-center gap-2">
                               <span>Reason</span>
-                              {(selectedPayload as any).error_code && (
+                              {selectedPayload.error_code && (
                                 <Badge
                                   variant="destructive"
                                   className="text-xs"
                                 >
-                                  Error {(selectedPayload as any).error_code}
+                                  Error {selectedPayload.error_code}
                                 </Badge>
                               )}
                             </div>
                             <div className="rounded-md bg-muted p-3 text-sm whitespace-pre-wrap">
-                              {(selectedPayload as any).reason}
+                              {selectedPayload.reason}
                             </div>
                           </div>
                         )}
 
                         {(() => {
-                          const llmResp = (selectedPayload as any).llm_response;
-                          const claudeReq = llmResp?.claude_request;
-                          const messages = claudeReq?.messages;
+                          const llmResp = selectedPayload.llm_response;
+                          const claudeReq = llmResp?.claude_request as Record<string, unknown> | undefined;
+                          const messages = claudeReq?.messages as Array<Record<string, unknown>> | undefined;
                           const lastUserMsg = messages?.length
                             ? messages[messages.length - 1]
                             : null;
                           const userContent =
                             lastUserMsg?.role === "user"
-                              ? lastUserMsg.content
+                              ? lastUserMsg.content as string
                               : null;
 
                           return userContent ? (
@@ -1638,9 +1813,9 @@ export function LiveTab({
                         })()}
 
                         {(() => {
-                          const llmResp = (selectedPayload as any).llm_response;
-                          const claudeReq = llmResp?.claude_request;
-                          const systemPrompt = claudeReq?.system;
+                          const llmResp = selectedPayload.llm_response;
+                          const claudeReq = llmResp?.claude_request as Record<string, unknown> | undefined;
+                          const systemPrompt = claudeReq?.system as string | undefined;
 
                           return systemPrompt &&
                             typeof systemPrompt === "string" ? (
@@ -1663,7 +1838,7 @@ export function LiveTab({
                           ) : null;
                         })()}
 
-                        {(selectedPayload as any).edited_content && (
+                        {selectedPayload.edited_content && (
                           <div>
                             <div className="text-xs font-medium text-muted-foreground mb-1 flex items-center gap-2">
                               <span>AI Response</span>
@@ -1680,12 +1855,12 @@ export function LiveTab({
                               </Badge>
                             </div>
                             <div className="rounded-md bg-yellow-900/20 border border-yellow-500/30 p-3 text-sm whitespace-pre-wrap">
-                              {(selectedPayload as any).edited_content}
+                              {selectedPayload.edited_content}
                             </div>
                           </div>
                         )}
 
-                        {(selectedPayload as any).approved_content && (
+                        {selectedPayload.approved_content && (
                           <div>
                             <div className="text-xs font-medium text-muted-foreground mb-1 flex items-center gap-2">
                               <span>AI Response</span>
@@ -1702,14 +1877,14 @@ export function LiveTab({
                               </Badge>
                             </div>
                             <div className="rounded-md bg-green-900/20 border border-green-500/30 p-3 text-sm whitespace-pre-wrap">
-                              {(selectedPayload as any).approved_content}
+                              {selectedPayload.approved_content}
                             </div>
                           </div>
                         )}
 
                         {(() => {
-                          const llmResp = (selectedPayload as any).llm_response;
-                          const usage = llmResp?.usage;
+                          const llmResp = selectedPayload.llm_response;
+                          const usage = llmResp?.usage as { input_tokens?: number; output_tokens?: number } | undefined;
 
                           return usage ? (
                             <div>
@@ -1756,7 +1931,7 @@ export function LiveTab({
                           ) : null;
                         })()}
 
-                        {(selectedPayload as any).llm_response && (
+                        {selectedPayload.llm_response && (
                           <div>
                             <div className="text-xs font-medium text-muted-foreground mb-1 flex items-center justify-between">
                               <span>Full LLM Response (JSON)</span>
@@ -1782,7 +1957,7 @@ export function LiveTab({
                                   size="sm"
                                   variant="outline"
                                   onClick={() => {
-                                    const data = (selectedPayload as any)
+                                    const data = selectedPayload
                                       .llm_response;
                                     void navigator.clipboard.writeText(
                                       safeStringify(data),
@@ -1796,7 +1971,7 @@ export function LiveTab({
                             </div>
                             <pre className="text-xs overflow-auto rounded-md bg-muted p-3 max-h-[400px]">
                               {safeStringify(
-                                (selectedPayload as any).llm_response,
+                                selectedPayload.llm_response,
                               )}
                             </pre>
                           </div>
@@ -1815,8 +1990,16 @@ export function LiveTab({
                     </CardHeader>
                     <CardContent className="pt-0">
                       {(() => {
-                        const llmResp = (selectedPayload as any).llm_response;
-                        const routing = llmResp?._meta?.routing;
+                        const llmResp = selectedPayload.llm_response;
+                        const _meta = llmResp?._meta as Record<string, unknown> | undefined;
+                        const routing = _meta?.routing as {
+                          requires_mcp?: boolean;
+                          tools_available?: number | string;
+                          tools_used?: number;
+                          tool_use_rounds?: number;
+                          reason?: string;
+                          suggested_servers?: string[];
+                        } | undefined;
 
                         if (!routing) {
                           return (
@@ -1858,7 +2041,7 @@ export function LiveTab({
                                   {routing.tools_used ?? 0}
                                 </span>
                               </div>
-                              {routing.tool_use_rounds > 0 && (
+                              {(routing.tool_use_rounds ?? 0) > 0 && (
                                 <div className="flex items-center gap-1">
                                   <span className="text-xs text-muted-foreground">
                                     Rounds:
@@ -1908,8 +2091,16 @@ export function LiveTab({
                     </CardHeader>
                     <CardContent className="pt-0">
                       {(() => {
-                        const llmResp = (selectedPayload as any).llm_response;
-                        const mcpContext = llmResp?._meta?.mcp_context;
+                        const llmResp = selectedPayload.llm_response;
+                        const mcpMeta = llmResp?._meta as Record<string, unknown> | undefined;
+                        const mcpContext = mcpMeta?.mcp_context as {
+                          server_name?: string;
+                          tool?: string;
+                          duration_ms?: number;
+                          error?: string;
+                          args?: unknown;
+                          result?: unknown;
+                        }[] | undefined;
 
                         if (!mcpContext || mcpContext.length === 0) {
                           return (
@@ -1921,7 +2112,7 @@ export function LiveTab({
 
                         return (
                           <div className="space-y-3">
-                            {mcpContext.map((call: any, idx: number) => (
+                            {mcpContext.map((call, idx: number) => (
                               <div key={idx} className="rounded-lg border p-3">
                                 <div className="flex items-center gap-2 mb-2">
                                   <Badge variant="outline">
@@ -1977,31 +2168,66 @@ export function LiveTab({
                   <JsonPanel
                     title="Metadata"
                     data={{
-                      trace_id: (selectedPayload as any).trace_id,
-                      message_id: (selectedPayload as any).message_id,
-                      timestamp: (selectedPayload as any).timestamp,
+                      trace_id: selectedPayload.trace_id,
+                      message_id: selectedPayload.message_id,
+                      timestamp: selectedPayload.timestamp,
                       model:
                         (tryGet(selectedPayload, [
                           "llm_response",
                           "model",
                         ]) as string) || "N/A",
-                      decision: (selectedPayload as any).decision,
-                      error_code: (selectedPayload as any).error_code,
-                      reviewer: (selectedPayload as any).reviewer,
-                      review_type: (selectedPayload as any).review_type,
-                      enriched_at: (selectedPayload as any).llm_response?._meta
-                        ?.enriched_at,
-                      policy: (selectedPayload as any).llm_response?._meta
-                        ?.policy,
+                      decision: selectedPayload.decision,
+                      error_code: selectedPayload.error_code,
+                      reviewer: selectedPayload.reviewer,
+                      review_type: selectedPayload.review_type,
+                      enriched_at: (selectedPayload.llm_response?._meta as Record<string, unknown> | undefined)?.enriched_at,
+                      policy: (selectedPayload.llm_response?._meta as Record<string, unknown> | undefined)?.policy,
                     }}
                   />
                 </TabsContent>
               </Tabs>
             )}
 
+            {/* ── Client Message (auto mode) Detail ── */}
+            {isClientMessage && (
+              <div className="space-y-4 mt-2">
+                <div className="rounded-lg border border-purple-500/30 bg-purple-500/10 p-3 space-y-2">
+                  <div className="flex items-center gap-2">
+                    <Badge className="bg-purple-600 text-white text-xs">Auto Mode</Badge>
+                    <span className="text-xs text-muted-foreground ml-auto">
+                      {selectedPayload.trace_id}
+                    </span>
+                  </div>
+                </div>
+                <JsonPanel title="Message" data={selectedPayload.message} />
+                {Array.isArray(selectedPayload.history) && selectedPayload.history.length > 0 && (
+                  <JsonPanel title="History" data={selectedPayload.history} />
+                )}
+                {selectedPayload.meta != null && (
+                  <JsonPanel title="Meta" data={selectedPayload.meta} />
+                )}
+              </div>
+            )}
+
             {/* ── Policy Evaluation Detail ── */}
             {isPolicyEvaluation && (() => {
-              const pe = selectedPayload as any;
+              const pe = selectedPayload as {
+                decision?: string;
+                passed?: boolean;
+                policy_type?: string;
+                summary?: string;
+                evaluation_time_ms?: number;
+                violations?: Array<{
+                  severity?: string;
+                  rule_name?: string;
+                  rule_id?: string;
+                  policy_name?: string;
+                  reason?: string;
+                  suggestion?: string;
+                }>;
+                trace_id?: string;
+                message_id?: string;
+              };
               const isBlock = pe.decision === "BLOCK";
               const isWarn = pe.decision === "WARN";
 
@@ -2039,7 +2265,7 @@ export function LiveTab({
                   {pe.violations && pe.violations.length > 0 && (
                     <div className="space-y-2">
                       <div className="text-sm font-medium">Violations ({pe.violations.length})</div>
-                      {pe.violations.map((v: any, idx: number) => (
+                      {(pe.violations ?? []).map((v, idx: number) => (
                         <div key={idx} className={[
                           "rounded-lg border p-3 space-y-1.5",
                           v.severity === "block" ? "border-red-500/30 bg-red-500/5"

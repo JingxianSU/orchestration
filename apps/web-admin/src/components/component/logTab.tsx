@@ -239,7 +239,7 @@ function LogEntryCard({
           {formatDuration(log.duration_ms)}
         </div>
       )}
-    </button>
+    </div>
   );
 }
 
@@ -400,7 +400,7 @@ function CommLogEntryCard({
       {log.source && (
         <div className="mt-1 text-xs text-muted-foreground">{log.source}</div>
       )}
-    </button>
+    </div>
   );
 }
 
