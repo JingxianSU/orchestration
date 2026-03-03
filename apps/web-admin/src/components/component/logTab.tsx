@@ -5,6 +5,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { Input } from "@/components/ui/input";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   Select,
   SelectContent,
@@ -16,7 +17,6 @@ import {
   ArrowDownLeft,
   ArrowUpRight,
   Trash2,
-  Filter,
   Clock,
   Globe,
   Server,
@@ -59,6 +59,20 @@ type LogStats = {
   avg_duration_ms: number;
   status_distribution: Record<string, number>;
   method_distribution: Record<string, number>;
+};
+
+type CommLog = {
+  id: string;
+  timestamp: number;
+  datetime: string;
+  source: string;
+  channel: "ws" | "event" | "req" | "res";
+  kind: "connect" | "disconnect" | "event" | "request" | "response";
+  event?: string | null;
+  method?: string | null;
+  ok?: boolean | null;
+  payload?: Record<string, unknown>;
+  error?: string | null;
 };
 
 interface LogTabProps {
@@ -174,19 +188,16 @@ function JsonViewer({ data, title }: { data: unknown; title: string }) {
 
 function LogEntryCard({
   log,
-  isSelected,
-  onClick,
+  isExpanded,
 }: {
   log: HttpLog;
-  isSelected: boolean;
-  onClick: () => void;
+  isExpanded: boolean;
 }) {
   return (
     <div
-      className={`p-3 border rounded-lg cursor-pointer transition-all hover:bg-muted/50 ${
-        isSelected ? "border-primary bg-muted/30" : "border-border"
+      className={`w-full p-3 border rounded-lg text-left transition-all hover:bg-muted/50 ${
+        isExpanded ? "border-primary bg-muted/30" : "border-border"
       }`}
-      onClick={onClick}
     >
       <div className="flex items-center gap-2 mb-2">
         {log.direction === "inbound" ? (
@@ -228,7 +239,7 @@ function LogEntryCard({
           {formatDuration(log.duration_ms)}
         </div>
       )}
-    </div>
+    </button>
   );
 }
 
@@ -354,15 +365,61 @@ function LogDetailPanel({ log }: { log: HttpLog }) {
   );
 }
 
+function CommLogEntryCard({
+  log,
+  isExpanded,
+}: {
+  log: CommLog;
+  isExpanded: boolean;
+}) {
+  const title =
+    log.channel === "event"
+      ? `event: ${log.event || "(unknown)"}`
+      : log.channel === "req"
+        ? `req: ${log.method || "(unknown)"}`
+        : log.channel === "res"
+          ? `res: ${log.ok ? "ok" : "error"}`
+          : `ws: ${log.kind}`;
+
+  return (
+    <div
+      className={`w-full p-3 border rounded-lg text-left transition-all hover:bg-muted/50 ${
+        isExpanded ? "border-primary bg-muted/30" : "border-border"
+      }`}
+    >
+      <div className="flex items-center gap-2 mb-2">
+        <Badge variant="outline" className="text-xs font-mono">
+          {log.channel.toUpperCase()}
+        </Badge>
+        {log.error && <XCircle className="h-4 w-4 text-red-400" />}
+        <span className="text-xs text-muted-foreground ml-auto">
+          {formatTime(log.timestamp)}
+        </span>
+      </div>
+      <div className="text-sm font-mono text-foreground truncate">{title}</div>
+      {log.source && (
+        <div className="mt-1 text-xs text-muted-foreground">{log.source}</div>
+      )}
+    </button>
+  );
+}
+
 export function LogTab({ apiBase }: LogTabProps) {
   const [logs, setLogs] = React.useState<HttpLog[]>([]);
-  const [selectedLog, setSelectedLog] = React.useState<HttpLog | null>(null);
   const [stats, setStats] = React.useState<LogStats | null>(null);
   const [isPaused, setIsPaused] = React.useState(false);
+  const [expandedHttpIds, setExpandedHttpIds] = React.useState<string[]>([]);
+
+  const [commLogs, setCommLogs] = React.useState<CommLog[]>([]);
+  const [expandedCommIds, setExpandedCommIds] = React.useState<string[]>([]);
 
   const [filterDirection, setFilterDirection] = React.useState<string>("all");
   const [filterMethod, setFilterMethod] = React.useState<string>("all");
   const [filterUrl, setFilterUrl] = React.useState<string>("");
+
+  const [commChannel, setCommChannel] = React.useState<string>("all");
+  const [commKind, setCommKind] = React.useState<string>("all");
+  const [commSearch, setCommSearch] = React.useState<string>("");
 
   React.useEffect(() => {
     if (isPaused) return;
@@ -379,6 +436,15 @@ export function LogTab({ apiBase }: LogTabProps) {
             if (exists) return prev;
             const next = [logEntry, ...prev];
             return next.slice(0, 500);
+          });
+        }
+        if (parsed.type === "comm_log") {
+          const logEntry = parsed.data as CommLog;
+          setCommLogs((prev) => {
+            const exists = prev.some((l) => l.id === logEntry.id);
+            if (exists) return prev;
+            const next = [logEntry, ...prev];
+            return next.slice(0, 1000);
           });
         }
       } catch (e) {}
@@ -398,8 +464,8 @@ export function LogTab({ apiBase }: LogTabProps) {
           const data = await response.json();
           setLogs(data.logs || []);
         }
-      } catch (e) {
-        console.error("Failed to fetch logs:", e);
+      } catch {
+        // ignore network errors for log fetch
       }
     };
 
@@ -410,13 +476,26 @@ export function LogTab({ apiBase }: LogTabProps) {
           const data = await response.json();
           setStats(data);
         }
-      } catch (e) {
-        console.error("Failed to fetch stats:", e);
+      } catch {
+        // ignore network errors for stats fetch
+      }
+    };
+
+    const fetchCommLogs = async () => {
+      try {
+        const response = await fetch(`${apiBase}/api/comm-logs?limit=200`);
+        if (response.ok) {
+          const data = await response.json();
+          setCommLogs(data.logs || []);
+        }
+      } catch {
+        // ignore network errors for comm log fetch
       }
     };
 
     fetchLogs();
     fetchStats();
+    fetchCommLogs();
 
     const interval = setInterval(fetchStats, 5000);
     return () => clearInterval(interval);
@@ -426,9 +505,17 @@ export function LogTab({ apiBase }: LogTabProps) {
     try {
       await fetch(`${apiBase}/api/logs`, { method: "DELETE" });
       setLogs([]);
-      setSelectedLog(null);
-    } catch (e) {
-      console.error("Failed to clear logs:", e);
+    } catch {
+      // ignore network errors for clear logs
+    }
+  };
+
+  const handleClearCommLogs = async () => {
+    try {
+      await fetch(`${apiBase}/api/comm-logs`, { method: "DELETE" });
+      setCommLogs([]);
+    } catch {
+      // ignore network errors for clear logs
     }
   };
 
@@ -450,149 +537,284 @@ export function LogTab({ apiBase }: LogTabProps) {
     });
   }, [logs, filterDirection, filterMethod, filterUrl]);
 
+  const filteredCommLogs = React.useMemo(() => {
+    return commLogs.filter((log) => {
+      if (commChannel !== "all" && log.channel !== commChannel) {
+        return false;
+      }
+      if (commKind !== "all" && log.kind !== commKind) {
+        return false;
+      }
+      if (commSearch) {
+        const hay = JSON.stringify(log).toLowerCase();
+        if (!hay.includes(commSearch.toLowerCase())) return false;
+      }
+      return true;
+    });
+  }, [commLogs, commChannel, commKind, commSearch]);
+
+  const setHttpExpanded = React.useCallback((id: string, open: boolean) => {
+    setExpandedHttpIds((prev) =>
+      open
+        ? prev.includes(id)
+          ? prev
+          : [id, ...prev]
+        : prev.filter((x) => x !== id),
+    );
+  }, []);
+
+  const setCommExpanded = React.useCallback((id: string, open: boolean) => {
+    setExpandedCommIds((prev) =>
+      open
+        ? prev.includes(id)
+          ? prev
+          : [id, ...prev]
+        : prev.filter((x) => x !== id),
+    );
+  }, []);
+
   return (
-    <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 h-[calc(100vh-220px)]">
-      <Card className="flex flex-col">
-        <CardHeader className="pb-3">
-          <div className="flex items-center justify-between">
-            <CardTitle className="text-lg flex items-center gap-2">
-              <Globe className="h-5 w-5" />
-              HTTP Logs
-              <Badge variant="secondary" className="ml-2">
-                {filteredLogs.length}
-              </Badge>
-            </CardTitle>
-            <div className="flex items-center gap-2">
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => setIsPaused(!isPaused)}
-                className={isPaused ? "text-yellow-400" : "text-green-400"}
-              >
-                {isPaused ? (
-                  <>
-                    <Play className="h-4 w-4 mr-1" /> Resume
-                  </>
-                ) : (
-                  <>
-                    <Pause className="h-4 w-4 mr-1" /> Pause
-                  </>
-                )}
-              </Button>
-              <Button variant="ghost" size="sm" onClick={handleClearLogs}>
-                <Trash2 className="h-4 w-4 mr-1" />
-                Clear
-              </Button>
-            </div>
-          </div>
+    <Tabs defaultValue="http" className="w-full">
+      <TabsList className="grid w-full grid-cols-2 bg-muted/40">
+        <TabsTrigger value="http">HTTP Logs</TabsTrigger>
+        <TabsTrigger value="openclaw">OpenClaw Logs</TabsTrigger>
+      </TabsList>
 
-          {/* Stats Bar */}
-          {stats && (
-            <div className="flex flex-wrap gap-3 mt-2 text-xs">
-              <div className="flex items-center gap-1">
-                <ArrowDownLeft className="h-3 w-3 text-blue-400" />
-                <span className="text-muted-foreground">In:</span>
-                <span>{stats.inbound}</span>
-              </div>
-              <div className="flex items-center gap-1">
-                <ArrowUpRight className="h-3 w-3 text-purple-400" />
-                <span className="text-muted-foreground">Out:</span>
-                <span>{stats.outbound}</span>
-              </div>
-              <div className="flex items-center gap-1">
-                <XCircle className="h-3 w-3 text-red-400" />
-                <span className="text-muted-foreground">Errors:</span>
-                <span>{stats.errors}</span>
-              </div>
-              <div className="flex items-center gap-1">
-                <Clock className="h-3 w-3 text-gray-400" />
-                <span className="text-muted-foreground">Avg:</span>
-                <span>{stats.avg_duration_ms.toFixed(0)}ms</span>
+      <TabsContent value="http" className="mt-4">
+        <Card className="flex flex-col h-[calc(100vh-220px)]">
+          <CardHeader className="pb-3">
+            <div className="flex items-center justify-between">
+              <CardTitle className="text-lg flex items-center gap-2">
+                <Globe className="h-5 w-5" />
+                HTTP Logs
+                <Badge variant="secondary" className="ml-2">
+                  {filteredLogs.length}
+                </Badge>
+              </CardTitle>
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setIsPaused(!isPaused)}
+                  className={isPaused ? "text-yellow-400" : "text-green-400"}
+                >
+                  {isPaused ? (
+                    <>
+                      <Play className="h-4 w-4 mr-1" /> Resume
+                    </>
+                  ) : (
+                    <>
+                      <Pause className="h-4 w-4 mr-1" /> Pause
+                    </>
+                  )}
+                </Button>
+                <Button variant="ghost" size="sm" onClick={handleClearLogs}>
+                  <Trash2 className="h-4 w-4 mr-1" />
+                  Clear
+                </Button>
               </div>
             </div>
-          )}
 
-          {/* Filters */}
-          <div className="flex flex-wrap gap-2 mt-3">
-            <Select value={filterDirection} onValueChange={setFilterDirection}>
-              <SelectTrigger className="w-[120px] h-8 text-xs">
-                <SelectValue placeholder="Direction" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All</SelectItem>
-                <SelectItem value="inbound">Inbound</SelectItem>
-                <SelectItem value="outbound">Outbound</SelectItem>
-              </SelectContent>
-            </Select>
-
-            <Select value={filterMethod} onValueChange={setFilterMethod}>
-              <SelectTrigger className="w-[100px] h-8 text-xs">
-                <SelectValue placeholder="Method" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All</SelectItem>
-                <SelectItem value="GET">GET</SelectItem>
-                <SelectItem value="POST">POST</SelectItem>
-                <SelectItem value="PUT">PUT</SelectItem>
-                <SelectItem value="PATCH">PATCH</SelectItem>
-                <SelectItem value="DELETE">DELETE</SelectItem>
-              </SelectContent>
-            </Select>
-
-            <Input
-              placeholder="Filter URL..."
-              value={filterUrl}
-              onChange={(e) => setFilterUrl(e.target.value)}
-              className="flex-1 h-8 text-xs min-w-[150px]"
-            />
-          </div>
-        </CardHeader>
-
-        <CardContent className="flex-1 overflow-hidden p-0">
-          <ScrollArea className="h-full px-4 pb-4">
-            <div className="space-y-2">
-              {filteredLogs.length === 0 ? (
-                <div className="text-center text-muted-foreground py-8">
-                  <Server className="h-12 w-12 mx-auto mb-2 opacity-30" />
-                  <p>No HTTP logs yet</p>
-                  <p className="text-xs">Logs will appear here in real-time</p>
+            {stats && (
+              <div className="flex flex-wrap gap-3 mt-2 text-xs">
+                <div className="flex items-center gap-1">
+                  <ArrowDownLeft className="h-3 w-3 text-blue-400" />
+                  <span className="text-muted-foreground">In:</span>
+                  <span>{stats.inbound}</span>
                 </div>
-              ) : (
-                filteredLogs.map((log) => (
-                  <LogEntryCard
-                    key={log.id}
-                    log={log}
-                    isSelected={selectedLog?.id === log.id}
-                    onClick={() => setSelectedLog(log)}
-                  />
-                ))
-              )}
-            </div>
-          </ScrollArea>
-        </CardContent>
-      </Card>
-
-      {/* Right Panel - Log Details */}
-      <Card className="flex flex-col">
-        <CardHeader className="pb-3">
-          <CardTitle className="text-lg flex items-center gap-2">
-            <Filter className="h-5 w-5" />
-            Log Details
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="flex-1 overflow-hidden p-0">
-          <ScrollArea className="h-full px-4 pb-4">
-            {selectedLog ? (
-              <LogDetailPanel log={selectedLog} />
-            ) : (
-              <div className="text-center text-muted-foreground py-8">
-                <AlertCircle className="h-12 w-12 mx-auto mb-2 opacity-30" />
-                <p>Select a log entry to view details</p>
+                <div className="flex items-center gap-1">
+                  <ArrowUpRight className="h-3 w-3 text-purple-400" />
+                  <span className="text-muted-foreground">Out:</span>
+                  <span>{stats.outbound}</span>
+                </div>
+                <div className="flex items-center gap-1">
+                  <XCircle className="h-3 w-3 text-red-400" />
+                  <span className="text-muted-foreground">Errors:</span>
+                  <span>{stats.errors}</span>
+                </div>
+                <div className="flex items-center gap-1">
+                  <Clock className="h-3 w-3 text-gray-400" />
+                  <span className="text-muted-foreground">Avg:</span>
+                  <span>{stats.avg_duration_ms.toFixed(0)}ms</span>
+                </div>
               </div>
             )}
-          </ScrollArea>
-        </CardContent>
-      </Card>
-    </div>
+
+            <div className="flex flex-wrap gap-2 mt-3">
+              <Select value={filterDirection} onValueChange={setFilterDirection}>
+                <SelectTrigger className="w-[120px] h-8 text-xs">
+                  <SelectValue placeholder="Direction" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All</SelectItem>
+                  <SelectItem value="inbound">Inbound</SelectItem>
+                  <SelectItem value="outbound">Outbound</SelectItem>
+                </SelectContent>
+              </Select>
+
+              <Select value={filterMethod} onValueChange={setFilterMethod}>
+                <SelectTrigger className="w-[100px] h-8 text-xs">
+                  <SelectValue placeholder="Method" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All</SelectItem>
+                  <SelectItem value="GET">GET</SelectItem>
+                  <SelectItem value="POST">POST</SelectItem>
+                  <SelectItem value="PUT">PUT</SelectItem>
+                  <SelectItem value="PATCH">PATCH</SelectItem>
+                  <SelectItem value="DELETE">DELETE</SelectItem>
+                </SelectContent>
+              </Select>
+
+              <Input
+                placeholder="Filter URL..."
+                value={filterUrl}
+                onChange={(e) => setFilterUrl(e.target.value)}
+                className="flex-1 h-8 text-xs min-w-[150px]"
+              />
+            </div>
+          </CardHeader>
+
+          <CardContent className="flex-1 overflow-hidden p-0">
+            <ScrollArea className="h-full px-4 pb-4">
+              <div className="space-y-2">
+                {filteredLogs.length === 0 ? (
+                  <div className="text-center text-muted-foreground py-8">
+                    <Server className="h-12 w-12 mx-auto mb-2 opacity-30" />
+                    <p>No HTTP logs yet</p>
+                    <p className="text-xs">Logs will appear here in real-time</p>
+                  </div>
+                ) : (
+                  filteredLogs.map((log) => {
+                    const isExpanded = expandedHttpIds.includes(log.id);
+                    return (
+                      <Collapsible
+                        key={log.id}
+                        open={isExpanded}
+                        onOpenChange={(open) => setHttpExpanded(log.id, open)}
+                      >
+                        <CollapsibleTrigger asChild>
+                          <div>
+                            <LogEntryCard log={log} isExpanded={isExpanded} />
+                          </div>
+                        </CollapsibleTrigger>
+                        <CollapsibleContent className="mt-2">
+                          <div className="rounded-lg border border-border bg-muted/30 p-3">
+                            <LogDetailPanel log={log} />
+                          </div>
+                        </CollapsibleContent>
+                      </Collapsible>
+                    );
+                  })
+                )}
+              </div>
+            </ScrollArea>
+          </CardContent>
+        </Card>
+      </TabsContent>
+
+      <TabsContent value="openclaw" className="mt-4">
+        <Card className="flex flex-col h-[calc(100vh-220px)]">
+          <CardHeader className="pb-3">
+            <div className="flex items-center justify-between">
+              <CardTitle className="text-lg flex items-center gap-2">
+                <Server className="h-5 w-5" />
+                OpenClaw Comms
+                <Badge variant="secondary" className="ml-2">
+                  {filteredCommLogs.length}
+                </Badge>
+              </CardTitle>
+              <div className="flex items-center gap-2">
+                <Button variant="ghost" size="sm" onClick={handleClearCommLogs}>
+                  <Trash2 className="h-4 w-4 mr-1" />
+                  Clear
+                </Button>
+              </div>
+            </div>
+
+            <div className="flex flex-wrap gap-2 mt-3">
+              <Select value={commChannel} onValueChange={setCommChannel}>
+                <SelectTrigger className="w-[120px] h-8 text-xs">
+                  <SelectValue placeholder="Channel" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All</SelectItem>
+                  <SelectItem value="ws">WS</SelectItem>
+                  <SelectItem value="event">Event</SelectItem>
+                  <SelectItem value="req">Req</SelectItem>
+                  <SelectItem value="res">Res</SelectItem>
+                </SelectContent>
+              </Select>
+
+              <Select value={commKind} onValueChange={setCommKind}>
+                <SelectTrigger className="w-[140px] h-8 text-xs">
+                  <SelectValue placeholder="Kind" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All</SelectItem>
+                  <SelectItem value="connect">Connect</SelectItem>
+                  <SelectItem value="disconnect">Disconnect</SelectItem>
+                  <SelectItem value="event">Event</SelectItem>
+                  <SelectItem value="request">Request</SelectItem>
+                  <SelectItem value="response">Response</SelectItem>
+                </SelectContent>
+              </Select>
+
+              <Input
+                placeholder="Search payload..."
+                value={commSearch}
+                onChange={(e) => setCommSearch(e.target.value)}
+                className="flex-1 h-8 text-xs min-w-[150px]"
+              />
+            </div>
+          </CardHeader>
+
+          <CardContent className="flex-1 overflow-hidden p-0">
+            <ScrollArea className="h-full px-4 pb-4">
+              <div className="space-y-2">
+                {filteredCommLogs.length === 0 ? (
+                  <div className="text-center text-muted-foreground py-8">
+                    <Server className="h-12 w-12 mx-auto mb-2 opacity-30" />
+                    <p>No OpenClaw comm logs yet</p>
+                    <p className="text-xs">Events will appear here in real-time</p>
+                  </div>
+                ) : (
+                  filteredCommLogs.map((log) => {
+                    const isExpanded = expandedCommIds.includes(log.id);
+                    return (
+                      <Collapsible
+                        key={log.id}
+                        open={isExpanded}
+                        onOpenChange={(open) => setCommExpanded(log.id, open)}
+                      >
+                        <CollapsibleTrigger asChild>
+                          <div>
+                            <CommLogEntryCard log={log} isExpanded={isExpanded} />
+                          </div>
+                        </CollapsibleTrigger>
+                        <CollapsibleContent className="mt-2">
+                          <div className="rounded-lg border border-border bg-muted/30 p-3">
+                            {log.error && (
+                              <div className="bg-red-500/10 border border-red-500/30 rounded-lg p-3 mb-3">
+                                <div className="flex items-center gap-2 text-red-400 mb-1">
+                                  <AlertCircle className="h-4 w-4" />
+                                  <span className="text-sm font-medium">Error</span>
+                                </div>
+                                <code className="text-sm text-red-300">{log.error}</code>
+                              </div>
+                            )}
+                            <JsonViewer data={log.payload || {}} title="Payload" />
+                          </div>
+                        </CollapsibleContent>
+                      </Collapsible>
+                    );
+                  })
+                )}
+              </div>
+            </ScrollArea>
+          </CardContent>
+        </Card>
+      </TabsContent>
+    </Tabs>
   );
 }

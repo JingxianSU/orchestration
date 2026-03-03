@@ -8,6 +8,8 @@ from .registry import router as registry_router
 from .config import router as config_router
 from .policy import router as policy_router
 from .logs import router as logs_router
+from .comm_logs import router as comm_logs_router
+from .external_registry import router as external_registry_router
 
 __all__ = [
     "health_router",
@@ -20,4 +22,6 @@ __all__ = [
     "config_router",
     "policy_router",
     "logs_router",
+    "comm_logs_router",
+    "external_registry_router",
 ]

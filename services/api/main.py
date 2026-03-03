@@ -16,12 +16,16 @@ from middleware import HttpLoggingMiddleware
 from db import MongoStore
 from services.mcp_manager import mcp_manager
 from services.policy_engine import policy_engine
+from services.openclaw_gateway_client import OpenClawGatewayClient
 from provenance.events import set_mongo_store
 from routers.provenance import set_mongo
 
 
 # MongoDB singleton
 _mongo: MongoStore | None = None
+
+# OpenClaw gateway client singleton
+_openclaw_client: OpenClawGatewayClient | None = None
 
 
 @asynccontextmanager
@@ -53,7 +57,22 @@ async def lifespan(app: FastAPI):
         print("[API] Policy engine initialized")
     except Exception as e:
         print(f"[API] Failed to initialize policy engine: {e}")
-    
+
+    # Start OpenClaw gateway client if configured
+    global _openclaw_client
+    if settings.OPENCLAW_GATEWAY_URL and settings.OPENCLAW_GATEWAY_TOKEN:
+        try:
+            scopes = [s.strip() for s in settings.OPENCLAW_GATEWAY_SCOPES.split(",") if s.strip()]
+            _openclaw_client = OpenClawGatewayClient(
+                url=settings.OPENCLAW_GATEWAY_URL,
+                token=settings.OPENCLAW_GATEWAY_TOKEN,
+                scopes=scopes,
+            )
+            await _openclaw_client.start()
+            print("[API] OpenClaw gateway client started")
+        except Exception as e:
+            print(f"[API] Failed to start OpenClaw gateway client: {e}")
+
     # Initialize MongoDB if configured
     mongo_uri = os.getenv("MONGODB_URI")
     if mongo_uri:
@@ -73,13 +92,17 @@ async def lifespan(app: FastAPI):
         print("[API] MongoDB not configured (MONGODB_URI not set)")
     
     yield
-    
+
     # Shutdown
     print("[API] Shutting down...")
-    
+
+    # Stop OpenClaw gateway client
+    if _openclaw_client is not None:
+        await _openclaw_client.stop()
+
     # Close MCP connections
     await mcp_manager.close_all()
-    
+
     # Close MongoDB
     if _mongo is not None:
         await _mongo.close()
@@ -117,6 +140,8 @@ from routers import (
     config_router,
     policy_router,
     logs_router,
+    comm_logs_router,
+    external_registry_router,
 )
 
 app.include_router(health_router)
@@ -129,6 +154,8 @@ app.include_router(registry_router)
 app.include_router(config_router)
 app.include_router(policy_router)
 app.include_router(logs_router)
+app.include_router(comm_logs_router)
+app.include_router(external_registry_router)  # External component registry
 
 
 # Root endpoint
