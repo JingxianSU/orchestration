@@ -27,6 +27,12 @@ import {
   ChevronRight,
   Pause,
   Play,
+  FileText,
+  FolderOpen,
+  Radio,
+  Wifi,
+  WifiOff,
+  Bot,
 } from "lucide-react";
 import {
   Collapsible,
@@ -66,8 +72,8 @@ type CommLog = {
   timestamp: number;
   datetime: string;
   source: string;
-  channel: "ws" | "event" | "req" | "res";
-  kind: "connect" | "disconnect" | "event" | "request" | "response";
+  channel: "ws" | "event" | "req" | "res" | "transcript" | "workspace" | "discovery";
+  kind: "connect" | "disconnect" | "event" | "request" | "response" | "entry" | "file" | "service";
   event?: string | null;
   method?: string | null;
   ok?: boolean | null;
@@ -167,7 +173,7 @@ function JsonViewer({ data, title }: { data: unknown; title: string }) {
         {title}
       </CollapsibleTrigger>
       <CollapsibleContent className="mt-2">
-        <div className="relative">
+        <div className="relative max-w-full overflow-hidden">
           <Button
             variant="ghost"
             size="sm"
@@ -177,7 +183,7 @@ function JsonViewer({ data, title }: { data: unknown; title: string }) {
             <Copy className="h-3 w-3 mr-1" />
             {copied ? "Copied" : "Copy"}
           </Button>
-          <pre className="bg-muted/50 p-3 rounded-md text-xs overflow-x-auto max-h-48 font-mono">
+          <pre className="bg-muted/50 p-3 rounded-md text-xs max-h-48 font-mono overflow-auto w-full max-w-full">
             {jsonString}
           </pre>
         </div>
@@ -404,6 +410,124 @@ function CommLogEntryCard({
   );
 }
 
+// ── Transcript entry (JSONL line from ~/.openclaw/agents/.../sessions/*.jsonl) ──
+function TranscriptEntryCard({
+  log,
+  isExpanded,
+}: {
+  log: CommLog;
+  isExpanded: boolean;
+}) {
+  const p = log.payload ?? {};
+  const role = (p.role as string | undefined) ?? (p.type as string | undefined) ?? "unknown";
+  const content =
+    typeof p.content === "string"
+      ? p.content
+      : typeof p.text === "string"
+        ? p.text
+        : JSON.stringify(p.content ?? p.text ?? p);
+  const agentId = (p._agent_id as string | undefined) ?? log.source.split(":").pop() ?? "";
+  const sessionId = (p._session_id as string | undefined) ?? log.event ?? "";
+  const roleColor =
+    role === "user"
+      ? "text-blue-400"
+      : role === "assistant"
+        ? "text-green-400"
+        : role === "tool"
+          ? "text-yellow-400"
+          : "text-gray-400";
+
+  return (
+    <div
+      className={`w-full p-3 border rounded-lg text-left transition-all hover:bg-muted/50 ${
+        isExpanded ? "border-primary bg-muted/30" : "border-border"
+      }`}
+    >
+      <div className="flex items-center gap-2 mb-1">
+        <Bot className="h-3.5 w-3.5 text-muted-foreground" />
+        <span className="text-xs text-muted-foreground font-mono truncate max-w-[140px]">{agentId}</span>
+        <Badge variant="outline" className={`text-[10px] px-1.5 py-0 font-mono ${roleColor}`}>
+          {role}
+        </Badge>
+        <span className="text-xs text-muted-foreground ml-auto">{formatTime(log.timestamp)}</span>
+      </div>
+      <div className="text-sm text-foreground truncate">{content.slice(0, 120)}</div>
+      <div className="mt-0.5 text-xs text-muted-foreground truncate font-mono">session: {sessionId}</div>
+    </div>
+  );
+}
+
+// ── Workspace file card ─────────────────────────────────────────────────────
+function WorkspaceFileCard({
+  log,
+  isExpanded,
+}: {
+  log: CommLog;
+  isExpanded: boolean;
+}) {
+  const p = log.payload ?? {};
+  const name = (p.name as string | undefined) ?? log.event ?? "unknown";
+  const size = (p.size as number | undefined) ?? 0;
+  const content = (p.content as string | undefined) ?? "";
+
+  return (
+    <div
+      className={`w-full p-3 border rounded-lg text-left transition-all hover:bg-muted/50 ${
+        isExpanded ? "border-primary bg-muted/30" : "border-border"
+      }`}
+    >
+      <div className="flex items-center gap-2 mb-1">
+        <FileText className="h-4 w-4 text-blue-400" />
+        <span className="text-sm font-mono text-foreground">{name}</span>
+        <Badge variant="outline" className="text-[10px] px-1.5 py-0 text-muted-foreground ml-auto">
+          {size > 1024 ? `${(size / 1024).toFixed(1)}KB` : `${size}B`}
+        </Badge>
+      </div>
+      <div className="text-xs text-muted-foreground truncate">{content.slice(0, 80)}</div>
+    </div>
+  );
+}
+
+// ── Discovery service card ──────────────────────────────────────────────────
+function DiscoveryServiceCard({
+  log,
+  isExpanded,
+}: {
+  log: CommLog;
+  isExpanded: boolean;
+}) {
+  const p = log.payload ?? {};
+  const host = (p.host as string | undefined) ?? "?";
+  const port = (p.port as number | undefined) ?? 0;
+  const name = (p.name as string | undefined) ?? "unknown";
+  const txt = (p.txt as Record<string, string> | undefined) ?? {};
+
+  return (
+    <div
+      className={`w-full p-3 border rounded-lg text-left transition-all hover:bg-muted/50 ${
+        isExpanded ? "border-primary bg-muted/30" : "border-border"
+      }`}
+    >
+      <div className="flex items-center gap-2 mb-1">
+        <Radio className="h-4 w-4 text-green-400" />
+        <span className="text-sm font-mono text-foreground truncate">{name}</span>
+        <Badge variant="outline" className="text-xs font-mono text-green-400 border-green-500/30 ml-auto">
+          {host}:{port}
+        </Badge>
+      </div>
+      {Object.keys(txt).length > 0 && (
+        <div className="flex flex-wrap gap-1 mt-1">
+          {Object.entries(txt).map(([k, v]) => (
+            <span key={k} className="text-[10px] font-mono text-muted-foreground">
+              {k}={v}
+            </span>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function LogTab({ apiBase }: LogTabProps) {
   const [logs, setLogs] = React.useState<HttpLog[]>([]);
   const [stats, setStats] = React.useState<LogStats | null>(null);
@@ -420,6 +544,7 @@ export function LogTab({ apiBase }: LogTabProps) {
   const [commChannel, setCommChannel] = React.useState<string>("all");
   const [commKind, setCommKind] = React.useState<string>("all");
   const [commSearch, setCommSearch] = React.useState<string>("");
+  const [openclawSubTab, setOpenclawSubTab] = React.useState<string>("live");
 
   React.useEffect(() => {
     if (isPaused) return;
@@ -552,6 +677,36 @@ export function LogTab({ apiBase }: LogTabProps) {
       return true;
     });
   }, [commLogs, commChannel, commKind, commSearch]);
+
+  // Split comm logs by channel category
+  const liveCommLogs = React.useMemo(
+    () => filteredCommLogs.filter((l) => ["ws", "event", "req", "res"].includes(l.channel)),
+    [filteredCommLogs],
+  );
+  const transcriptLogs = React.useMemo(
+    () => commLogs.filter((l) => l.channel === "transcript"),
+    [commLogs],
+  );
+  // Workspace: deduplicate by file name, keep latest
+  const workspaceLogs = React.useMemo(() => {
+    const byName = new Map<string, CommLog>();
+    commLogs
+      .filter((l) => l.channel === "workspace")
+      .forEach((l) => {
+        const name = (l.payload?.name as string | undefined) ?? l.event ?? l.id;
+        const existing = byName.get(name);
+        if (!existing || l.timestamp > existing.timestamp) byName.set(name, l);
+      });
+    return Array.from(byName.values()).sort((a, b) => {
+      const na = (a.payload?.name as string | undefined) ?? "";
+      const nb = (b.payload?.name as string | undefined) ?? "";
+      return na.localeCompare(nb);
+    });
+  }, [commLogs]);
+  const discoveryLogs = React.useMemo(
+    () => commLogs.filter((l) => l.channel === "discovery"),
+    [commLogs],
+  );
 
   const setHttpExpanded = React.useCallback((id: string, open: boolean) => {
     setExpandedHttpIds((prev) =>
@@ -715,103 +870,215 @@ export function LogTab({ apiBase }: LogTabProps) {
 
       <TabsContent value="openclaw" className="mt-4">
         <Card className="flex flex-col h-[calc(100vh-220px)]">
-          <CardHeader className="pb-3">
+          <CardHeader className="pb-2">
             <div className="flex items-center justify-between">
               <CardTitle className="text-lg flex items-center gap-2">
                 <Server className="h-5 w-5" />
-                OpenClaw Comms
-                <Badge variant="secondary" className="ml-2">
-                  {filteredCommLogs.length}
-                </Badge>
+                OpenClaw
               </CardTitle>
-              <div className="flex items-center gap-2">
-                <Button variant="ghost" size="sm" onClick={handleClearCommLogs}>
-                  <Trash2 className="h-4 w-4 mr-1" />
-                  Clear
-                </Button>
-              </div>
-            </div>
-
-            <div className="flex flex-wrap gap-2 mt-3">
-              <Select value={commChannel} onValueChange={setCommChannel}>
-                <SelectTrigger className="w-[120px] h-8 text-xs">
-                  <SelectValue placeholder="Channel" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All</SelectItem>
-                  <SelectItem value="ws">WS</SelectItem>
-                  <SelectItem value="event">Event</SelectItem>
-                  <SelectItem value="req">Req</SelectItem>
-                  <SelectItem value="res">Res</SelectItem>
-                </SelectContent>
-              </Select>
-
-              <Select value={commKind} onValueChange={setCommKind}>
-                <SelectTrigger className="w-[140px] h-8 text-xs">
-                  <SelectValue placeholder="Kind" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All</SelectItem>
-                  <SelectItem value="connect">Connect</SelectItem>
-                  <SelectItem value="disconnect">Disconnect</SelectItem>
-                  <SelectItem value="event">Event</SelectItem>
-                  <SelectItem value="request">Request</SelectItem>
-                  <SelectItem value="response">Response</SelectItem>
-                </SelectContent>
-              </Select>
-
-              <Input
-                placeholder="Search payload..."
-                value={commSearch}
-                onChange={(e) => setCommSearch(e.target.value)}
-                className="flex-1 h-8 text-xs min-w-[150px]"
-              />
+              <Button variant="ghost" size="sm" onClick={handleClearCommLogs}>
+                <Trash2 className="h-4 w-4 mr-1" />
+                Clear All
+              </Button>
             </div>
           </CardHeader>
 
-          <CardContent className="flex-1 overflow-hidden p-0">
-            <ScrollArea className="h-full px-4 pb-4">
-              <div className="space-y-2">
-                {filteredCommLogs.length === 0 ? (
-                  <div className="text-center text-muted-foreground py-8">
-                    <Server className="h-12 w-12 mx-auto mb-2 opacity-30" />
-                    <p>No OpenClaw comm logs yet</p>
-                    <p className="text-xs">Events will appear here in real-time</p>
-                  </div>
-                ) : (
-                  filteredCommLogs.map((log) => {
-                    const isExpanded = expandedCommIds.includes(log.id);
-                    return (
-                      <Collapsible
-                        key={log.id}
-                        open={isExpanded}
-                        onOpenChange={(open) => setCommExpanded(log.id, open)}
-                      >
-                        <CollapsibleTrigger asChild>
-                          <div>
-                            <CommLogEntryCard log={log} isExpanded={isExpanded} />
-                          </div>
-                        </CollapsibleTrigger>
-                        <CollapsibleContent className="mt-2">
-                          <div className="rounded-lg border border-border bg-muted/30 p-3">
-                            {log.error && (
-                              <div className="bg-red-500/10 border border-red-500/30 rounded-lg p-3 mb-3">
-                                <div className="flex items-center gap-2 text-red-400 mb-1">
-                                  <AlertCircle className="h-4 w-4" />
-                                  <span className="text-sm font-medium">Error</span>
-                                </div>
-                                <code className="text-sm text-red-300">{log.error}</code>
+          <CardContent className="flex-1 overflow-hidden p-0 flex flex-col">
+            <Tabs value={openclawSubTab} onValueChange={setOpenclawSubTab} className="flex flex-col flex-1 overflow-hidden">
+              <TabsList className="mx-4 grid grid-cols-4 bg-muted/40 shrink-0">
+                <TabsTrigger value="live" className="text-xs gap-1">
+                  <Wifi className="h-3 w-3" />
+                  Live
+                  <Badge variant="secondary" className="text-[10px] px-1 py-0 ml-0.5">{liveCommLogs.length}</Badge>
+                </TabsTrigger>
+                <TabsTrigger value="transcripts" className="text-xs gap-1">
+                  <Bot className="h-3 w-3" />
+                  Transcripts
+                  <Badge variant="secondary" className="text-[10px] px-1 py-0 ml-0.5">{transcriptLogs.length}</Badge>
+                </TabsTrigger>
+                <TabsTrigger value="workspace" className="text-xs gap-1">
+                  <FolderOpen className="h-3 w-3" />
+                  Workspace
+                  <Badge variant="secondary" className="text-[10px] px-1 py-0 ml-0.5">{workspaceLogs.length}</Badge>
+                </TabsTrigger>
+                <TabsTrigger value="discovery" className="text-xs gap-1">
+                  <Radio className="h-3 w-3" />
+                  Discovery
+                  <Badge variant="secondary" className="text-[10px] px-1 py-0 ml-0.5">{discoveryLogs.length}</Badge>
+                </TabsTrigger>
+              </TabsList>
+
+              {/* ── Live WS/Event/Req/Res ── */}
+              <TabsContent value="live" className="flex-1 overflow-hidden mt-0 px-4 pt-3">
+                <div className="flex flex-wrap gap-2 mb-3">
+                  <Select value={commChannel} onValueChange={setCommChannel}>
+                    <SelectTrigger className="w-[110px] h-7 text-xs">
+                      <SelectValue placeholder="Channel" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All</SelectItem>
+                      <SelectItem value="ws">WS</SelectItem>
+                      <SelectItem value="event">Event</SelectItem>
+                      <SelectItem value="req">Req</SelectItem>
+                      <SelectItem value="res">Res</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <Select value={commKind} onValueChange={setCommKind}>
+                    <SelectTrigger className="w-[130px] h-7 text-xs">
+                      <SelectValue placeholder="Kind" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All</SelectItem>
+                      <SelectItem value="connect">Connect</SelectItem>
+                      <SelectItem value="disconnect">Disconnect</SelectItem>
+                      <SelectItem value="event">Event</SelectItem>
+                      <SelectItem value="request">Request</SelectItem>
+                      <SelectItem value="response">Response</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <Input
+                    placeholder="Search..."
+                    value={commSearch}
+                    onChange={(e) => setCommSearch(e.target.value)}
+                    className="flex-1 h-7 text-xs min-w-[120px]"
+                  />
+                </div>
+                <ScrollArea className="h-[calc(100%-52px)]">
+                  <div className="space-y-2 pb-4">
+                    {liveCommLogs.length === 0 ? (
+                      <div className="text-center text-muted-foreground py-12">
+                        <WifiOff className="h-10 w-10 mx-auto mb-2 opacity-30" />
+                        <p className="text-sm">No live comm events</p>
+                        <p className="text-xs mt-1">Requires OPENCLAW_GATEWAY_URL to be configured</p>
+                      </div>
+                    ) : (
+                      liveCommLogs.map((log) => {
+                        const isExpanded = expandedCommIds.includes(log.id);
+                        return (
+                          <Collapsible key={log.id} open={isExpanded} onOpenChange={(open) => setCommExpanded(log.id, open)}>
+                            <CollapsibleTrigger asChild>
+                              <div><CommLogEntryCard log={log} isExpanded={isExpanded} /></div>
+                            </CollapsibleTrigger>
+                            <CollapsibleContent className="mt-1">
+                              <div className="rounded-lg border border-border bg-muted/30 p-3">
+                                {log.error && (
+                                  <div className="bg-red-500/10 border border-red-500/30 rounded-lg p-3 mb-3">
+                                    <div className="flex items-center gap-2 text-red-400 mb-1">
+                                      <AlertCircle className="h-4 w-4" />
+                                      <span className="text-sm font-medium">Error</span>
+                                    </div>
+                                    <code className="text-sm text-red-300">{log.error}</code>
+                                  </div>
+                                )}
+                                <JsonViewer data={log.payload || {}} title="Payload" />
                               </div>
-                            )}
-                            <JsonViewer data={log.payload || {}} title="Payload" />
-                          </div>
-                        </CollapsibleContent>
-                      </Collapsible>
-                    );
-                  })
-                )}
-              </div>
-            </ScrollArea>
+                            </CollapsibleContent>
+                          </Collapsible>
+                        );
+                      })
+                    )}
+                  </div>
+                </ScrollArea>
+              </TabsContent>
+
+              {/* ── Transcripts ── */}
+              <TabsContent value="transcripts" className="flex-1 overflow-hidden mt-0 px-4 pt-3">
+                <ScrollArea className="h-full">
+                  <div className="space-y-2 pb-4">
+                    {transcriptLogs.length === 0 ? (
+                      <div className="text-center text-muted-foreground py-12">
+                        <Bot className="h-10 w-10 mx-auto mb-2 opacity-30" />
+                        <p className="text-sm">No transcripts found</p>
+                        <p className="text-xs mt-1">~/.openclaw/agents/&lt;id&gt;/sessions/*.jsonl</p>
+                      </div>
+                    ) : (
+                      transcriptLogs.map((log) => {
+                        const isExpanded = expandedCommIds.includes(log.id);
+                        return (
+                          <Collapsible key={log.id} open={isExpanded} onOpenChange={(open) => setCommExpanded(log.id, open)}>
+                            <CollapsibleTrigger asChild>
+                              <div><TranscriptEntryCard log={log} isExpanded={isExpanded} /></div>
+                            </CollapsibleTrigger>
+                            <CollapsibleContent className="mt-1">
+                              <div className="rounded-lg border border-border bg-muted/30 p-3">
+                                <JsonViewer data={log.payload || {}} title="Full Entry" />
+                              </div>
+                            </CollapsibleContent>
+                          </Collapsible>
+                        );
+                      })
+                    )}
+                  </div>
+                </ScrollArea>
+              </TabsContent>
+
+              {/* ── Workspace ── */}
+              <TabsContent value="workspace" className="flex-1 overflow-hidden mt-0 px-4 pt-3">
+                <ScrollArea className="h-full">
+                  <div className="space-y-2 pb-4">
+                    {workspaceLogs.length === 0 ? (
+                      <div className="text-center text-muted-foreground py-12">
+                        <FolderOpen className="h-10 w-10 mx-auto mb-2 opacity-30" />
+                        <p className="text-sm">No workspace files found</p>
+                        <p className="text-xs mt-1">~/.openclaw/workspace/*.md</p>
+                      </div>
+                    ) : (
+                      workspaceLogs.map((log) => {
+                        const isExpanded = expandedCommIds.includes(log.id);
+                        const content = (log.payload?.content as string | undefined) ?? "";
+                        return (
+                          <Collapsible key={log.id} open={isExpanded} onOpenChange={(open) => setCommExpanded(log.id, open)}>
+                            <CollapsibleTrigger asChild>
+                              <div><WorkspaceFileCard log={log} isExpanded={isExpanded} /></div>
+                            </CollapsibleTrigger>
+                            <CollapsibleContent className="mt-1">
+                              <div className="rounded-lg border border-border bg-muted/30 p-3">
+                                {log.error ? (
+                                  <div className="text-sm text-red-400">{log.error}</div>
+                                ) : (
+                                  <pre className="text-xs font-mono whitespace-pre-wrap break-words max-h-96 overflow-y-auto">{content}</pre>
+                                )}
+                              </div>
+                            </CollapsibleContent>
+                          </Collapsible>
+                        );
+                      })
+                    )}
+                  </div>
+                </ScrollArea>
+              </TabsContent>
+
+              {/* ── Discovery ── */}
+              <TabsContent value="discovery" className="flex-1 overflow-hidden mt-0 px-4 pt-3">
+                <ScrollArea className="h-full">
+                  <div className="space-y-2 pb-4">
+                    {discoveryLogs.length === 0 ? (
+                      <div className="text-center text-muted-foreground py-12">
+                        <Radio className="h-10 w-10 mx-auto mb-2 opacity-30" />
+                        <p className="text-sm">No services discovered</p>
+                        <p className="text-xs mt-1">mDNS _openclaw-gw._tcp</p>
+                      </div>
+                    ) : (
+                      discoveryLogs.map((log) => {
+                        const isExpanded = expandedCommIds.includes(log.id);
+                        return (
+                          <Collapsible key={log.id} open={isExpanded} onOpenChange={(open) => setCommExpanded(log.id, open)}>
+                            <CollapsibleTrigger asChild>
+                              <div><DiscoveryServiceCard log={log} isExpanded={isExpanded} /></div>
+                            </CollapsibleTrigger>
+                            <CollapsibleContent className="mt-1">
+                              <div className="rounded-lg border border-border bg-muted/30 p-3">
+                                <JsonViewer data={log.payload || {}} title="Service Info" />
+                              </div>
+                            </CollapsibleContent>
+                          </Collapsible>
+                        );
+                      })
+                    )}
+                  </div>
+                </ScrollArea>
+              </TabsContent>
+            </Tabs>
           </CardContent>
         </Card>
       </TabsContent>
