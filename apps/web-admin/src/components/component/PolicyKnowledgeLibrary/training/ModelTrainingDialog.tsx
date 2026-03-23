@@ -657,7 +657,7 @@ const ModelTrainingDialog: React.FC<ModelTrainingDialogProps> = ({
           <Select
             value={rdrConfig.conflictResolution}
             onValueChange={(v) =>
-              setRdrConfig({ ...rdrConfig, conflictResolution: v as any })
+              setRdrConfig({ ...rdrConfig, conflictResolution: v as RdrConfig["conflictResolution"] })
             }
           >
             <SelectTrigger>
@@ -790,7 +790,7 @@ const ModelTrainingDialog: React.FC<ModelTrainingDialogProps> = ({
             <Select
               value={nnConfig.optimizer}
               onValueChange={(v) =>
-                setNnConfig({ ...nnConfig, optimizer: v as any })
+                setNnConfig({ ...nnConfig, optimizer: v as NnConfig["optimizer"] })
               }
             >
               <SelectTrigger>
@@ -868,7 +868,7 @@ const ModelTrainingDialog: React.FC<ModelTrainingDialogProps> = ({
         <Select
           value={kgConfig.graphModel}
           onValueChange={(v) =>
-            setKgConfig({ ...kgConfig, graphModel: v as any })
+            setKgConfig({ ...kgConfig, graphModel: v as KgConfig["graphModel"] })
           }
         >
           <SelectTrigger>
@@ -1441,7 +1441,7 @@ const ModelTrainingDialog: React.FC<ModelTrainingDialogProps> = ({
 
         <Tabs
           value={activeTab}
-          onValueChange={(v) => setActiveTab(v as any)}
+          onValueChange={(v) => setActiveTab(v as typeof activeTab)}
           className="flex-1"
         >
           <TabsList className="grid w-full grid-cols-3">

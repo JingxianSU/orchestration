@@ -1,5 +1,9 @@
 """
-OpenClaw Gateway WS client for real-time internal comms monitoring.
+OpenClaw Gateway WebSocket client.
+
+Connects to the OpenClaw gateway, performs the challenge/connect handshake, then streams
+all incoming events, requests, and responses to the comm logger. Automatically reconnects
+on disconnection and supports clean shutdown via an asyncio stop event.
 """
 from __future__ import annotations
 
@@ -40,6 +44,8 @@ class OpenClawGatewayClient:
 
         self._task: Optional[asyncio.Task] = None
         self._stop = asyncio.Event()
+        # Map from req id → method name for post-connect requests
+        self._pending_requests: Dict[str, str] = {}
 
     async def start(self) -> None:
         if self._task and not self._task.done():
@@ -67,6 +73,7 @@ class OpenClawGatewayClient:
                         payload={"url": self.url},
                     )
                     await self._handshake(ws)
+                    await self._post_connect_requests(ws)
                     await self._listen(ws)
             except asyncio.CancelledError:
                 return
@@ -136,6 +143,18 @@ class OpenClawGatewayClient:
                     return
                 raise RuntimeError(str(msg.get("error") or "connect failed"))
 
+    async def _post_connect_requests(self, ws: websockets.WebSocketClientProtocol) -> None:
+        """Send initial method requests after handshake; responses are handled in _listen."""
+        for method in ("tools.catalog", "presence.snapshot"):
+            req_id = str(uuid.uuid4())
+            self._pending_requests[req_id] = method
+            await ws.send(json.dumps({
+                "type": "req",
+                "id": req_id,
+                "method": method,
+                "params": {},
+            }))
+
     async def _listen(self, ws: websockets.WebSocketClientProtocol) -> None:
         while True:
             raw = await ws.recv()
@@ -166,10 +185,12 @@ class OpenClawGatewayClient:
                 continue
 
             if mtype == "res":
+                method = self._pending_requests.pop(msg.get("id", ""), None)
                 await comm_logger.log(
                     source="openclaw",
                     channel="res",
                     kind="response",
+                    method=method,
                     ok=bool(msg.get("ok")),
                     payload=msg.get("payload") or msg.get("error") or {},
                 )

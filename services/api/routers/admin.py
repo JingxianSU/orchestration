@@ -1,10 +1,15 @@
 """
-Admin API endpoints for HITL workflow.
+Admin router - HITL workflow decision endpoints.
+
+Handles primary admin approve/deny decisions, secondary LLM-output review, policy
+evaluation retrieval, and on-demand response regeneration. Integrates with the event
+bus, message queue, provenance store, policy engine, and external component registry.
 """
 from __future__ import annotations
 
 import os
 import time
+import traceback
 import uuid
 from typing import Any, Dict
 
@@ -65,6 +70,22 @@ async def admin_decide(
         timestamp=iso_utc_now(),
         decision_type="primary_approval" if decision.decision == "ALLOW" else "primary_rejection"
     )
+
+    # Step 4b: HITL -> Orch (admin has made input decision, sending back to orch)
+    await event_bus.publish({
+        "type": "hitl_admin_decision_input",
+        "trace_id": resp.trace_id,
+        "ts": int(time.time() * 1000),
+        "data": {
+            "message_id": message_id,
+            "decision": decision.decision,
+            "reviewer": "admin",
+            "reason": decision.reason or "",
+            "override_message": override_message or None,
+            "admin_prompt": admin_prompt,
+            "timestamp": iso_utc_now(),
+        }
+    })
 
     if decision.decision == "DENY":
         try:
@@ -142,6 +163,168 @@ async def admin_decide(
         )
         await message_queue.update_response(message_id, approved_resp)
 
+        # ── Branch: external component (OpenClaw / HTTP / WS) vs internal Claude ──
+        component_id = msg.component_id if msg else None
+
+        if component_id:
+            # ── External component path ───────────────────────────────────────
+            print(f"[ADMIN] Routing approved message to external component: {component_id}")
+
+            message_approved_data: Dict[str, Any] = {
+                "trace_id": resp.trace_id,
+                "message_id": message_id,
+                "decision": "ALLOW",
+                "reviewer": "admin",
+                "original_message": original_message,
+                "effective_message": final_message,
+                "admin_prompt": admin_prompt,
+                "timestamp": iso_utc_now(),
+                "meta": {
+                    "message_id": message_id,
+                    "approved_at": int(time.time() * 1000),
+                    "component_id": component_id,
+                }
+            }
+            await event_bus.publish({
+                "type": "message_approved",
+                "trace_id": resp.trace_id,
+                "ts": int(time.time() * 1000),
+                "data": message_approved_data
+            })
+
+            try:
+                from routers.external_registry import forward_to_component
+                forward_result = await forward_to_component(
+                    comp_id=component_id,
+                    message=final_message,
+                    trace_id=resp.trace_id,
+                    history=[h.model_dump() for h in (msg.history or [])] if msg and msg.history else None,
+                )
+                reply_text = forward_result.reply
+            except Exception as e:
+                print(f"[ADMIN] Error calling external component: {e}")
+                traceback.print_exc()
+                error_resp = ClientResponse(
+                    message_id=message_id,
+                    trace_id=resp.trace_id,
+                    status="rejected",
+                    reason=f"External component error: {str(e)}"
+                )
+                await message_queue.update_response(message_id, error_resp)
+                raise HTTPException(status_code=502, detail=str(e))
+
+            # Store as a synthetic ChatResponse so secondary-review code can reuse it
+            from models.chat import ChatResponse as ChatResponseModel
+            synthetic_chat_resp = ChatResponseModel(
+                trace_id=resp.trace_id,
+                reply=reply_text,
+                claude_model=component_id,
+                claude_request={"component_id": component_id, "message": final_message},
+                claude_response={"component_id": component_id, "reply": reply_text},
+            )
+            await message_queue.store_chat_response(message_id, synthetic_chat_resp)
+
+            try:
+                llm_prov = await store_llm_result_prov_event(
+                    message_id=message_id,
+                    trace_id=resp.trace_id,
+                    llm_response=reply_text,
+                    original_message=final_message,
+                    request=request
+                )
+                print(f"[ADMIN] Stored external component result to provenance: {llm_prov.event_id}")
+            except Exception as e:
+                print(f"[ADMIN] Error storing external result to provenance: {e}")
+
+            # Step 5: chat ai -> Orch (publish llm_response_ready BEFORE output policy)
+            await event_bus.publish({
+                "type": "llm_response_ready",
+                "trace_id": resp.trace_id,
+                "ts": int(time.time() * 1000),
+                "data": {
+                    "trace_id": resp.trace_id,
+                    "message_id": message_id,
+                    "original_message": original_message,
+                    "effective_message": final_message,
+                    "reply": reply_text,
+                    "component_id": component_id,
+                    "timestamp": iso_utc_now(),
+                }
+            })
+
+            # Output policy evaluation (steps 6 & 7)
+            output_eval_data = None
+            try:
+                from services.policy_engine import policy_engine
+                await event_bus.publish({
+                    "type": "policy_check_request",
+                    "trace_id": resp.trace_id,
+                    "ts": int(time.time() * 1000),
+                    "data": {
+                        "message_id": message_id,
+                        "policy_type": "output",
+                        "envelope_type": "policy.output",
+                        "action": "message.output.evaluate",
+                        "context": {
+                            "original_message": final_message,
+                            "history": [h.model_dump() for h in (msg.history or [])] if msg and msg.history else []
+                        },
+                        "payload": {"content": reply_text},
+                        "dry_run": False,
+                    }
+                })
+                output_eval = await policy_engine.evaluate_content(
+                    content=reply_text,
+                    policy_type="output",
+                    context={
+                        "original_message": final_message,
+                        "history": [h.model_dump() for h in (msg.history or [])] if msg and msg.history else []
+                    }
+                )
+                output_eval_data = {
+                    "decision": output_eval.decision,
+                    "passed": output_eval.passed,
+                    "violations": [v.model_dump() for v in output_eval.violations],
+                    "summary": output_eval.summary,
+                    "evaluation_time_ms": output_eval.evaluation_time_ms,
+                    "evaluated_policies": output_eval.evaluated_policies,
+                }
+                await message_queue.store_policy_evaluation(message_id, "output", output_eval_data)
+                await event_bus.publish({
+                    "type": "policy_evaluation",
+                    "trace_id": resp.trace_id,
+                    "ts": int(time.time() * 1000),
+                    "data": {
+                        "message_id": message_id,
+                        "policy_type": "output",
+                        **output_eval_data,
+                    }
+                })
+            except Exception as e:
+                print(f"[ADMIN] Error evaluating output policies: {e}")
+
+            # Step 8a: Orch -> HITL (secondary review: admin sees AI response)
+            await event_bus.publish({
+                "type": "secondary_review_request",
+                "trace_id": resp.trace_id,
+                "ts": int(time.time() * 1000),
+                "data": {
+                    "message_id": message_id,
+                    "llm_response": reply_text,
+                    "output_policy_evaluation": output_eval_data,
+                    "timestamp": iso_utc_now(),
+                }
+            })
+
+            return {
+                "status": "awaiting_secondary_review",
+                "message_id": message_id,
+                "llm_response": reply_text,
+                "trace_id": resp.trace_id,
+                "output_policy_evaluation": output_eval_data,
+            }
+
+        # ── Normal (internal chat / Claude) path ─────────────────────────
         chat_req = ChatRequest(
             trace_id=resp.trace_id,
             message=final_message,
@@ -219,11 +402,52 @@ async def admin_decide(
             except Exception as e:
                 print(f"[ADMIN] Error storing LLM result to provenance: {e}")
 
-            # ========== Output Policy Evaluation ==========
+            # Step 5: chat ai -> Orch (publish llm_response_ready BEFORE output policy)
+            llm_response_data = {
+                "trace_id": resp.trace_id,
+                "message_id": message_id,
+                "original_message": original_message,
+                "effective_message": final_message,
+                "admin_prompt": admin_prompt,
+                "reply": chat_response.reply,
+                "claude_model": chat_response.claude_model,
+                "claude_request": chat_response.claude_request,
+                "claude_response": chat_response.claude_response,
+                "timings_ms": chat_response.timings_ms,
+                "errors": chat_response.errors,
+                "timestamp": iso_utc_now()
+            }
+
+            await event_bus.publish({
+                "type": "llm_response_ready",
+                "trace_id": resp.trace_id,
+                "ts": int(time.time() * 1000),
+                "data": llm_response_data
+            })
+            print(f"[ADMIN] Published llm_response_ready event for {message_id}")
+
+            # ========== Output Policy Evaluation (steps 6 & 7) ==========
             output_eval_data = None
             try:
                 from services.policy_engine import policy_engine
                 print(f"[ADMIN] Evaluating output policies for {message_id}...")
+                await event_bus.publish({
+                    "type": "policy_check_request",
+                    "trace_id": resp.trace_id,
+                    "ts": int(time.time() * 1000),
+                    "data": {
+                        "message_id": message_id,
+                        "policy_type": "output",
+                        "envelope_type": "policy.output",
+                        "action": "message.output.evaluate",
+                        "context": {
+                            "original_message": final_message,
+                            "history": [h.model_dump() for h in (msg.history or [])] if msg and msg.history else []
+                        },
+                        "payload": {"content": chat_response.reply},
+                        "dry_run": False,
+                    }
+                })
                 output_eval = await policy_engine.evaluate_content(
                     content=chat_response.reply,
                     policy_type="output",
@@ -262,28 +486,18 @@ async def admin_decide(
             except Exception as e:
                 print(f"[ADMIN] Error evaluating output policies: {e}")
 
-            llm_response_data = {
-                "trace_id": resp.trace_id,
-                "message_id": message_id,
-                "original_message": original_message,
-                "effective_message": final_message,
-                "admin_prompt": admin_prompt,
-                "reply": chat_response.reply,
-                "claude_model": chat_response.claude_model,
-                "claude_request": chat_response.claude_request,
-                "claude_response": chat_response.claude_response,
-                "timings_ms": chat_response.timings_ms,
-                "errors": chat_response.errors,
-                "timestamp": iso_utc_now()
-            }
-
+            # Step 8a: Orch -> HITL (secondary review: admin sees AI response)
             await event_bus.publish({
-                "type": "llm_response_ready",
+                "type": "secondary_review_request",
                 "trace_id": resp.trace_id,
                 "ts": int(time.time() * 1000),
-                "data": llm_response_data
+                "data": {
+                    "message_id": message_id,
+                    "llm_response": chat_response.reply,
+                    "output_policy_evaluation": output_eval_data,
+                    "timestamp": iso_utc_now(),
+                }
             })
-            print(f"[ADMIN] Published llm_response_ready event for {message_id}")
 
             return {
                 "status": "awaiting_secondary_review",
@@ -294,7 +508,6 @@ async def admin_decide(
             }
 
         except Exception as e:
-            import traceback
             print(f"[ADMIN] Error processing chat: {str(e)}")
             traceback.print_exc()
 
@@ -327,6 +540,21 @@ async def admin_secondary_review(
     original_message = msg.message if msg else ""
     
     effective_message = review.effective_message or original_message
+
+    # Step 8b: HITL -> Orch (admin secondary decision sent back to orch)
+    await event_bus.publish({
+        "type": "hitl_admin_decision_output",
+        "trace_id": resp.trace_id,
+        "ts": int(time.time() * 1000),
+        "data": {
+            "message_id": message_id,
+            "action": review.action,
+            "reviewer": "admin",
+            "reject_reason": review.reject_reason or None,
+            "edited_content": review.edited_content or None,
+            "timestamp": iso_utc_now(),
+        }
+    })
 
     cached_chat_response = await message_queue.get_chat_response(message_id)
     llm_response_envelope = None
@@ -576,7 +804,6 @@ async def admin_regenerate(
         }
         
     except Exception as e:
-        import traceback
         print(f"[ADMIN-REGENERATE] Error: {str(e)}")
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))

@@ -1,3 +1,5 @@
+// Rule Detail Drawer - slide-over panel showing full detail for a selected policy rule.
+// Displays metadata, source documents, inference model visualization, and change history.
 "use client";
 
 import React, { useState } from "react";
@@ -16,6 +18,7 @@ import {
   ChevronRight,
   ChevronDown,
   Circle,
+  HelpCircle,
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -29,6 +32,12 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 
 import type { Rule, FilterOptions } from "./types";
@@ -261,6 +270,7 @@ interface RuleDetailDrawerProps {
   open: boolean;
   onClose: () => void;
   onEdit: (rule: Rule) => void;
+  onDelete?: (rule: Rule) => void;
   filterOptions: FilterOptions;
 }
 
@@ -269,6 +279,7 @@ const RuleDetailDrawer: React.FC<RuleDetailDrawerProps> = ({
   open,
   onClose,
   onEdit,
+  onDelete,
   filterOptions,
 }) => {
   const [trainingDialogOpen, setTrainingDialogOpen] = useState(false);
@@ -334,10 +345,17 @@ const RuleDetailDrawer: React.FC<RuleDetailDrawerProps> = ({
               <Edit className="h-4 w-4 mr-1" />
               Edit
             </Button>
-            <Button variant="outline" size="sm" className="text-red-600">
-              <Trash2 className="h-4 w-4 mr-1" />
-              Delete
-            </Button>
+            {onDelete && (
+              <Button
+                variant="outline"
+                size="sm"
+                className="text-red-600"
+                onClick={() => { onDelete(rule); onClose(); }}
+              >
+                <Trash2 className="h-4 w-4 mr-1" />
+                Delete
+              </Button>
+            )}
           </div>
         </SheetHeader>
 
@@ -348,25 +366,25 @@ const RuleDetailDrawer: React.FC<RuleDetailDrawerProps> = ({
           <TabsList className="px-6 py-2 border-b justify-start rounded-none bg-transparent h-auto flex-shrink-0">
             <TabsTrigger
               value="properties"
-              className="data-[state=active]:bg-gray-100"
+              className="data-[state=active]:bg-gray-100 data-[state=active]:text-foreground data-[state=active]:font-bold"
             >
               Properties
             </TabsTrigger>
             <TabsTrigger
               value="source"
-              className="data-[state=active]:bg-gray-100"
+              className="data-[state=active]:bg-gray-100 data-[state=active]:text-foreground data-[state=active]:font-bold"
             >
               Source
             </TabsTrigger>
             <TabsTrigger
               value="model"
-              className="data-[state=active]:bg-gray-100"
+              className="data-[state=active]:bg-gray-100 data-[state=active]:text-foreground data-[state=active]:font-bold"
             >
               Model
             </TabsTrigger>
             <TabsTrigger
               value="history"
-              className="data-[state=active]:bg-gray-100"
+              className="data-[state=active]:bg-gray-100 data-[state=active]:text-foreground data-[state=active]:font-bold"
             >
               History
             </TabsTrigger>
@@ -556,8 +574,35 @@ const RuleDetailDrawer: React.FC<RuleDetailDrawerProps> = ({
                       </div>
 
                       <div className="flex items-start gap-2 flex-wrap sm:flex-nowrap">
-                        <span className="text-sm font-medium text-gray-600 w-full sm:w-32 flex-shrink-0">
+                        <span className="text-sm font-medium text-gray-600 w-full sm:w-32 flex-shrink-0 flex items-center gap-1">
                           Trust Worthy:
+                          <TooltipProvider delayDuration={200}>
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <HelpCircle className="h-3.5 w-3.5 text-muted-foreground cursor-help" />
+                              </TooltipTrigger>
+                              <TooltipContent
+                                side="right"
+                                className="max-w-xs text-xs leading-relaxed bg-popover text-popover-foreground border shadow-md p-3"
+                              >
+                                <p className="font-semibold mb-1.5">Trust Worthy Types</p>
+                                <div className="space-y-2">
+                                  <div>
+                                    <span className="font-medium text-blue-400">Explainable</span>
+                                    <p className="text-muted-foreground mt-0.5">The system provides reasoning behind its output, tracing back to the underlying logic or rules that led to the conclusion.</p>
+                                  </div>
+                                  <div>
+                                    <span className="font-medium text-purple-400">Interpretable</span>
+                                    <p className="text-muted-foreground mt-0.5">The mechanism is transparent enough to follow — whether through a lookup, a formula, or a step-by-step process — even without knowing the deeper rationale.</p>
+                                  </div>
+                                  <div>
+                                    <span className="font-medium text-amber-400">Case</span>
+                                    <p className="text-muted-foreground mt-0.5">Decisions are supported by real or representative examples that demonstrate expected behavior in practice.</p>
+                                  </div>
+                                </div>
+                              </TooltipContent>
+                            </Tooltip>
+                          </TooltipProvider>
                         </span>
                         <div className="flex flex-wrap gap-1 w-full">
                           <Badge

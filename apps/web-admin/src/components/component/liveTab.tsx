@@ -123,7 +123,8 @@ function safeStringify(value: unknown): string {
 function toStr(value: unknown): string {
   if (typeof value === "string") return value;
   if (value == null) return "";
-  if (typeof value === "number" || typeof value === "boolean") return String(value);
+  if (typeof value === "number" || typeof value === "boolean")
+    return String(value);
   try {
     return JSON.stringify(value);
   } catch {
@@ -276,7 +277,9 @@ function LogDetailsDialog({
   logs: HttpLog[];
 }) {
   const messageId = selectedPayload?.message_id as string | undefined;
-  const llmResponse = selectedPayload?.llm_response as Record<string, unknown> | undefined;
+  const llmResponse = selectedPayload?.llm_response as
+    | Record<string, unknown>
+    | undefined;
 
   // llmResponse.content is the Claude API content blocks array: [{type:"text", text:"..."}]
   // Extract the plain text from the first text block, falling back gracefully.
@@ -287,10 +290,17 @@ function LogDetailsDialog({
     // Claude API envelope: content is an array of blocks
     const blocks = llmResponse.content;
     if (Array.isArray(blocks)) {
-      return blocks
-        .filter((b): b is { type: string; text: string } => typeof b === "object" && b !== null && (b as Record<string, unknown>).type === "text")
-        .map((b) => b.text)
-        .join("\n") || undefined;
+      return (
+        blocks
+          .filter(
+            (b): b is { type: string; text: string } =>
+              typeof b === "object" &&
+              b !== null &&
+              (b as Record<string, unknown>).type === "text",
+          )
+          .map((b) => b.text)
+          .join("\n") || undefined
+      );
     }
     // Fallback: stringify
     if (typeof blocks === "string") return blocks;
@@ -298,9 +308,12 @@ function LogDetailsDialog({
   }, [llmResponse]);
 
   const messageContent =
-    (selectedPayload?.original_message as string | undefined) || llmResponseText;
+    (selectedPayload?.original_message as string | undefined) ||
+    llmResponseText;
   const timestamp = selectedPayload?.timestamp as string | number | undefined;
-  const originalMessage = selectedPayload?.original_message as string | undefined;
+  const originalMessage = selectedPayload?.original_message as
+    | string
+    | undefined;
 
   const relatedLogs = React.useMemo(() => {
     if (!selectedPayload) return [];
@@ -367,7 +380,9 @@ function LogDetailsDialog({
           <DialogTitle>Related HTTP Logs</DialogTitle>
           <DialogDescription className="flex gap-2 flex-wrap">
             {!!selectedPayload?.trace_id && (
-              <Badge variant="outline">Trace: {String(selectedPayload.trace_id)}</Badge>
+              <Badge variant="outline">
+                Trace: {String(selectedPayload.trace_id)}
+              </Badge>
             )}
             {!!selectedPayload?.message_id && (
               <Badge variant="outline">
@@ -376,7 +391,8 @@ function LogDetailsDialog({
             )}
             {timestamp && (
               <Badge variant="outline">
-                Time: {new Date(timestamp as string | number).toLocaleTimeString()}
+                Time:{" "}
+                {new Date(timestamp as string | number).toLocaleTimeString()}
               </Badge>
             )}
           </DialogDescription>
@@ -425,67 +441,89 @@ function LogDetailsDialog({
                   </CollapsibleTrigger>
                   <CollapsibleContent className="mt-2 space-y-3">
                     {/* Request Headers */}
-                    {log.request_headers && Object.keys(log.request_headers).length > 0 && (
-                      <div>
-                        <div className="flex justify-between items-center mb-1">
-                          <p className="text-xs text-muted-foreground font-medium">Request Headers:</p>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            className="h-6 px-2"
-                            onClick={() => {
-                              navigator.clipboard.writeText(JSON.stringify(log.request_headers, null, 2));
-                            }}
-                          >
-                            <Copy className="h-3 w-3 mr-1" />
-                            Copy
-                          </Button>
+                    {log.request_headers &&
+                      Object.keys(log.request_headers).length > 0 && (
+                        <div>
+                          <div className="flex justify-between items-center mb-1">
+                            <p className="text-xs text-muted-foreground font-medium">
+                              Request Headers:
+                            </p>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="h-6 px-2"
+                              onClick={() => {
+                                navigator.clipboard.writeText(
+                                  JSON.stringify(log.request_headers, null, 2),
+                                );
+                              }}
+                            >
+                              <Copy className="h-3 w-3 mr-1" />
+                              Copy
+                            </Button>
+                          </div>
+                          <div className="rounded bg-muted p-3">
+                            <table className="w-full text-xs font-mono">
+                              <tbody>
+                                {Object.entries(log.request_headers).map(
+                                  ([k, v]) => (
+                                    <tr key={k} className="align-top">
+                                      <td className="pr-3 text-muted-foreground whitespace-nowrap py-0.5 w-1/3">
+                                        {k}
+                                      </td>
+                                      <td className="break-all py-0.5">
+                                        {String(v)}
+                                      </td>
+                                    </tr>
+                                  ),
+                                )}
+                              </tbody>
+                            </table>
+                          </div>
                         </div>
-                        <div className="rounded bg-muted p-3">
-                          <table className="w-full text-xs font-mono">
-                            <tbody>
-                              {Object.entries(log.request_headers).map(([k, v]) => (
-                                <tr key={k} className="align-top">
-                                  <td className="pr-3 text-muted-foreground whitespace-nowrap py-0.5 w-1/3">{k}</td>
-                                  <td className="break-all py-0.5">{String(v)}</td>
-                                </tr>
-                              ))}
-                            </tbody>
-                          </table>
-                        </div>
-                      </div>
-                    )}
+                      )}
                     {/* Response Headers */}
-                    {log.response_headers && Object.keys(log.response_headers).length > 0 && (
-                      <div>
-                        <div className="flex justify-between items-center mb-1">
-                          <p className="text-xs text-muted-foreground font-medium">Response Headers:</p>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            className="h-6 px-2"
-                            onClick={() => {
-                              navigator.clipboard.writeText(JSON.stringify(log.response_headers, null, 2));
-                            }}
-                          >
-                            <Copy className="h-3 w-3 mr-1" />
-                            Copy
-                          </Button>
+                    {log.response_headers &&
+                      Object.keys(log.response_headers).length > 0 && (
+                        <div>
+                          <div className="flex justify-between items-center mb-1">
+                            <p className="text-xs text-muted-foreground font-medium">
+                              Response Headers:
+                            </p>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="h-6 px-2"
+                              onClick={() => {
+                                navigator.clipboard.writeText(
+                                  JSON.stringify(log.response_headers, null, 2),
+                                );
+                              }}
+                            >
+                              <Copy className="h-3 w-3 mr-1" />
+                              Copy
+                            </Button>
+                          </div>
+                          <div className="rounded bg-muted p-3">
+                            <table className="w-full text-xs font-mono">
+                              <tbody>
+                                {Object.entries(log.response_headers).map(
+                                  ([k, v]) => (
+                                    <tr key={k} className="align-top">
+                                      <td className="pr-3 text-muted-foreground whitespace-nowrap py-0.5 w-1/3">
+                                        {k}
+                                      </td>
+                                      <td className="break-all py-0.5">
+                                        {String(v)}
+                                      </td>
+                                    </tr>
+                                  ),
+                                )}
+                              </tbody>
+                            </table>
+                          </div>
                         </div>
-                        <div className="rounded bg-muted p-3">
-                          <table className="w-full text-xs font-mono">
-                            <tbody>
-                              {Object.entries(log.response_headers).map(([k, v]) => (
-                                <tr key={k} className="align-top">
-                                  <td className="pr-3 text-muted-foreground whitespace-nowrap py-0.5 w-1/3">{k}</td>
-                                  <td className="break-all py-0.5">{String(v)}</td>
-                                </tr>
-                              ))}
-                            </tbody>
-                          </table>
-                        </div>
-                      </div>
-                    )}
+                      )}
                     {/* Request Body */}
                     {log.request_body && (
                       <div>
@@ -498,7 +536,9 @@ function LogDetailsDialog({
                             size="sm"
                             className="h-6 px-2"
                             onClick={() => {
-                              navigator.clipboard.writeText(log.request_body ?? "");
+                              navigator.clipboard.writeText(
+                                log.request_body ?? "",
+                              );
                             }}
                           >
                             <Copy className="h-3 w-3 mr-1" />
@@ -520,7 +560,9 @@ function LogDetailsDialog({
                             size="sm"
                             className="h-6 px-2"
                             onClick={() => {
-                              navigator.clipboard.writeText(log.response_body ?? "");
+                              navigator.clipboard.writeText(
+                                log.response_body ?? "",
+                              );
                             }}
                           >
                             <Copy className="h-3 w-3 mr-1" />
@@ -655,21 +697,27 @@ function PolicyEvaluationAlert({
               {/* Description */}
               {v.rule_description && (
                 <p className="text-muted-foreground mb-1">
-                  <span className="font-medium text-foreground/80">Description:</span> {v.rule_description}
+                  <span className="font-medium text-foreground/80">
+                    Description:
+                  </span>{" "}
+                  {v.rule_description}
                 </p>
               )}
 
               {/* Rule Content */}
               {v.rule_content && (
                 <p className="text-muted-foreground mb-1">
-                  <span className="font-medium text-foreground/80">Rule:</span> {v.rule_content}
+                  <span className="font-medium text-foreground/80">Rule:</span>{" "}
+                  {v.rule_content}
                 </p>
               )}
 
               {/* Source */}
               {(v.source_document || v.source_section) && (
                 <p className="text-muted-foreground mb-1">
-                  <span className="font-medium text-foreground/80">Source:</span>{" "}
+                  <span className="font-medium text-foreground/80">
+                    Source:
+                  </span>{" "}
                   {v.source_document}
                   {v.source_section && ` (${v.source_section})`}
                 </p>
@@ -678,7 +726,10 @@ function PolicyEvaluationAlert({
               {/* Reason (AI evaluation result) */}
               <div className="mt-2 pt-2 border-t border-current/10">
                 <p className="text-muted-foreground">
-                  <span className="font-medium text-foreground/80">Violation:</span> {v.reason}
+                  <span className="font-medium text-foreground/80">
+                    Violation:
+                  </span>{" "}
+                  {v.reason}
                 </p>
               </div>
 
@@ -724,7 +775,10 @@ export function LiveTab({
   logs = [],
 }: LiveTabProps & { logs?: HttpLog[] }): React.JSX.Element {
   const [logDialogOpen, setLogDialogOpen] = React.useState(false);
-  const [logDialogPayload, setLogDialogPayload] = React.useState<Record<string, unknown> | null>(null);
+  const [logDialogPayload, setLogDialogPayload] = React.useState<Record<
+    string,
+    unknown
+  > | null>(null);
   const [editableUserMessage, setEditableUserMessage] =
     React.useState<string>("");
   const [adminPrompt, setAdminPrompt] = React.useState<string>("");
@@ -754,7 +808,7 @@ export function LiveTab({
       );
       if (scrollContainer) {
         scrollContainer.scrollTo({
-          top: 0,
+          top: scrollContainer.scrollHeight,
           behavior: "smooth",
         });
       }
@@ -847,7 +901,7 @@ export function LiveTab({
         >
           <div className="flex items-center gap-2 mb-1">
             <span className="text-sm font-medium text-foreground flex-shrink-0">
-              Message:
+              Orch → Chat AI
             </span>
             <Badge
               className={`text-xs flex-shrink-0 whitespace-nowrap ${badge.className}`}
@@ -855,12 +909,12 @@ export function LiveTab({
               {badge.label}
             </Badge>
           </div>
-          <div className="text-sm text-muted-foreground truncate">
-            {payload.original_message?.slice(0, 80)}
+          <div className="text-sm text-muted-foreground text-wrap">
+            Approved user message forwarded to AI pipeline
           </div>
           <div className="mt-1 flex flex-col gap-1 text-xs text-gray-400">
-            <span className="truncate">{when}</span>
-            <span className="truncate">Reviewer: {payload.reviewer}</span>
+            <span>{when}</span>
+            <span>Approver: {payload.reviewer}</span>
           </div>
         </button>
       );
@@ -940,7 +994,7 @@ export function LiveTab({
         >
           <div className="flex items-center gap-2 mb-1">
             <span className="text-sm font-medium text-foreground flex-shrink-0">
-              AI Response:
+              Orch → Chat AI
             </span>
             <Badge
               className={`text-xs flex-shrink-0 whitespace-nowrap ${badge.className}`}
@@ -948,12 +1002,14 @@ export function LiveTab({
               {badge.label}
             </Badge>
           </div>
-          <div className="text-sm text-muted-foreground truncate">
-            {payload.original_message?.slice(0, 80) || "N/A"}
+          <div className="text-sm text-muted-foreground text-wrap">
+            {decision === "DENY"
+              ? "AI response rejected and denial notice sent to chat"
+              : "AI response reviewed and delivered to chat"}
           </div>
           <div className="mt-1 flex flex-col gap-1 text-xs text-gray-400">
-            <span className="truncate">{when}</span>
-            <span className="truncate">Reviewer: {payload.reviewer}</span>
+            <span>{when}</span>
+            <span>Approver: {payload.reviewer}</span>
           </div>
         </button>
       );
@@ -967,16 +1023,16 @@ export function LiveTab({
       const policyTypeStr = (policyType ?? "").toUpperCase();
       const badge = passed
         ? {
-            label: `${policyTypeStr} POLICY: PASS`,
+            label: `PASS`,
             className: "bg-green-500 text-white",
           }
         : decision === "BLOCK"
           ? {
-              label: `${policyTypeStr} POLICY: BLOCKED`,
+              label: `BLOCK`,
               className: "bg-red-500 text-white",
             }
           : {
-              label: `${policyTypeStr} POLICY: WARN`,
+              label: `WARN`,
               className: "bg-yellow-500 text-black",
             };
 
@@ -992,7 +1048,7 @@ export function LiveTab({
         >
           <div className="flex items-center gap-2 mb-1">
             <span className="text-sm font-medium text-foreground flex-shrink-0">
-              Policy Check:
+              Policy Engine → Orch
             </span>
             <Badge
               className={`text-xs flex-shrink-0 whitespace-nowrap ${badge.className}`}
@@ -1000,20 +1056,57 @@ export function LiveTab({
               {badge.label}
             </Badge>
           </div>
-          <div className="text-sm text-muted-foreground truncate">
-            {payload.summary?.slice(0, 80) || `${policyType} evaluation`}
+          <div className="text-sm text-muted-foreground text-wrap">
+            {policyTypeStr} policy engine returned {badge.label} decision
+            {payload.summary ? `: ${payload.summary.slice(0, 80)}` : ""}
           </div>
-          <div className="mt-1 flex flex-col gap-1 text-xs text-gray-400">
-            <span className="truncate">{when}</span>
-            <span className="truncate">
-              Evaluated in {payload.evaluation_time_ms}ms
+          <div className="mt-1 text-xs text-gray-400">{when}</div>
+        </button>
+      );
+    }
+
+    if (payload?.type === "policy_check_request") {
+      const policyType = payload.policy_type;
+      const policyTypeStr = (policyType ?? "").toUpperCase();
+
+      return (
+        <button
+          key={t.id}
+          onClick={() => onSelectedIdChange(t.id)}
+          ref={isSelected ? selectedTraceRef : null}
+          className={[
+            "w-full text-left rounded-lg px-3 py-2 border transition-colors",
+            isSelected ? "bg-muted" : "bg-background hover:bg-muted/50",
+          ].join(" ")}
+        >
+          <div className="flex items-center gap-2 mb-1">
+            <span className="text-sm font-medium text-foreground flex-shrink-0">
+              Orch → Policy Engine
             </span>
+            <Badge className="text-xs flex-shrink-0 whitespace-nowrap bg-green-600 text-white">
+              Success
+            </Badge>
           </div>
+          <div className="text-sm text-muted-foreground text-wrap">
+            {policyTypeStr} policy evaluation request dispatched to policy
+            engine
+          </div>
+          <div className="mt-1 text-xs text-gray-400">{when}</div>
         </button>
       );
     }
 
     if (payload?.type === "client_message") {
+      const isAutoMode = !!(
+        payload?.meta as Record<string, unknown> | undefined
+      )?.auto_mode;
+      const componentId = (payload?.meta as Record<string, unknown> | undefined)
+        ?.component_id;
+      const source = componentId
+        ? `${String(componentId)}`
+        : isAutoMode
+          ? "Chat (Auto)"
+          : "Chat";
       return (
         <button
           key={t.id}
@@ -1025,13 +1118,195 @@ export function LiveTab({
           ].join(" ")}
         >
           <div className="flex items-center gap-2 mb-1">
-            <span className="text-sm font-medium text-foreground flex-shrink-0">Message:</span>
-            <Badge className="text-xs flex-shrink-0 bg-purple-600 text-white">AUTO</Badge>
+            <span className="text-sm font-medium text-foreground flex-shrink-0">
+              Chat AI → Orch
+            </span>
+            <Badge className="text-xs flex-shrink-0 bg-green-600 text-white">
+              Success
+            </Badge>
           </div>
-          <div className="text-sm text-muted-foreground truncate">
-            {toStr(payload.message).slice(0, 80)}
+          <div className="text-sm text-muted-foreground text-wrap">
+            Incoming message from {source} received by orchestration system
           </div>
-          <div className="mt-1 text-xs text-gray-400 truncate">{when}</div>
+          <div className="mt-1 text-xs text-gray-400">{when}</div>
+        </button>
+      );
+    }
+
+    // Step 4a: Orch -> HITL
+    if (payload?.type === "hitl_request") {
+      const passed = payload.input_policy_passed as boolean | undefined;
+      return (
+        <button
+          key={t.id}
+          ref={isSelected ? selectedTraceRef : null}
+          onClick={() => onSelectedIdChange(t.id)}
+          className={[
+            "w-full text-left rounded-lg px-3 py-2 border transition-colors",
+            isSelected ? "bg-muted" : "bg-background hover:bg-muted/50",
+          ].join(" ")}
+        >
+          <div className="flex items-center gap-2 mb-1">
+            <span className="text-sm font-medium text-foreground flex-shrink-0">
+              Orch → HITL
+            </span>
+            <Badge className={`text-xs flex-shrink-0 whitespace-nowrap ${passed === false ? "bg-yellow-500 text-black" : "bg-blue-600 text-white"}`}>
+              {passed === false ? "Policy Warning" : "Input Review"}
+            </Badge>
+          </div>
+          <div className="text-sm text-muted-foreground text-wrap">
+            Message sent to admin for input review — awaiting decision, flow paused
+          </div>
+          <div className="mt-1 text-xs text-gray-400">{when}</div>
+        </button>
+      );
+    }
+
+    // Step 4b: HITL -> Orch (admin input decision)
+    if (payload?.type === "hitl_admin_decision_input") {
+      const dec = payload.decision as string | undefined;
+      const isAllow = dec === "ALLOW";
+      return (
+        <button
+          key={t.id}
+          ref={isSelected ? selectedTraceRef : null}
+          onClick={() => onSelectedIdChange(t.id)}
+          className={[
+            "w-full text-left rounded-lg px-3 py-2 border transition-colors",
+            isSelected ? "bg-muted" : "bg-background hover:bg-muted/50",
+          ].join(" ")}
+        >
+          <div className="flex items-center gap-2 mb-1">
+            <span className="text-sm font-medium text-foreground flex-shrink-0">
+              HITL → Orch
+            </span>
+            <Badge className={`text-xs flex-shrink-0 whitespace-nowrap ${isAllow ? "bg-green-600 text-white" : "bg-red-600 text-white"}`}>
+              {isAllow ? "Allowed" : "Rejected"}
+            </Badge>
+          </div>
+          <div className="text-sm text-muted-foreground text-wrap">
+            {isAllow
+              ? "Admin approved — message forwarded to AI pipeline"
+              : "Admin rejected — flow terminated, no AI response will be sent"}
+          </div>
+          <div className="mt-1 flex flex-col gap-1 text-xs text-gray-400">
+            <span>{when}</span>
+            {payload.reason ? <span>Reason: {toStr(payload.reason)}</span> : null}
+          </div>
+        </button>
+      );
+    }
+
+    // Step 8a: Orch -> HITL (secondary review)
+    if (payload?.type === "secondary_review_request") {
+      const outputEval = payload.output_policy_evaluation as Record<string, unknown> | undefined | null;
+      const hasPolicyWarning = outputEval && outputEval.passed === false;
+      return (
+        <button
+          key={t.id}
+          ref={isSelected ? selectedTraceRef : null}
+          onClick={() => onSelectedIdChange(t.id)}
+          className={[
+            "w-full text-left rounded-lg px-3 py-2 border transition-colors",
+            isSelected ? "bg-muted" : "bg-background hover:bg-muted/50",
+          ].join(" ")}
+        >
+          <div className="flex items-center gap-2 mb-1">
+            <span className="text-sm font-medium text-foreground flex-shrink-0">
+              Orch → HITL
+            </span>
+            <Badge className={`text-xs flex-shrink-0 whitespace-nowrap ${hasPolicyWarning ? "bg-yellow-500 text-black" : "bg-blue-600 text-white"}`}>
+              Output Review
+            </Badge>
+          </div>
+          <div className="text-sm text-muted-foreground text-wrap">
+            AI response sent to admin for output review — awaiting decision, flow paused
+          </div>
+          <div className="mt-1 text-xs text-gray-400">{when}</div>
+        </button>
+      );
+    }
+
+    // Step 8b: HITL -> Orch (admin output decision)
+    if (payload?.type === "hitl_admin_decision_output") {
+      const action = payload.action as string | undefined;
+      const badgeCls =
+        action === "APPROVE"
+          ? "bg-green-600 text-white"
+          : action === "EDIT"
+            ? "bg-blue-500 text-white"
+            : "bg-red-600 text-white";
+      const badgeLabel =
+        action === "APPROVE" ? "Approved" : action === "EDIT" ? "Edited" : "Rejected";
+      return (
+        <button
+          key={t.id}
+          ref={isSelected ? selectedTraceRef : null}
+          onClick={() => onSelectedIdChange(t.id)}
+          className={[
+            "w-full text-left rounded-lg px-3 py-2 border transition-colors",
+            isSelected ? "bg-muted" : "bg-background hover:bg-muted/50",
+          ].join(" ")}
+        >
+          <div className="flex items-center gap-2 mb-1">
+            <span className="text-sm font-medium text-foreground flex-shrink-0">
+              HITL → Orch
+            </span>
+            <Badge className={`text-xs flex-shrink-0 whitespace-nowrap ${badgeCls}`}>
+              {badgeLabel}
+            </Badge>
+          </div>
+          <div className="text-sm text-muted-foreground text-wrap">
+            {action === "APPROVE"
+              ? "Admin approved AI response — delivering to chat"
+              : action === "EDIT"
+                ? "Admin approved with edits — delivering modified response to chat"
+                : "Admin rejected AI response — flow terminated, no response delivered"}
+          </div>
+          <div className="mt-1 flex flex-col gap-1 text-xs text-gray-400">
+            <span>{when}</span>
+            {payload.reject_reason ? <span>Reason: {toStr(payload.reject_reason)}</span> : null}
+          </div>
+        </button>
+      );
+    }
+
+    if (payload?.type === "llm_response_ready") {
+      const model = (payload as Record<string, unknown>).claude_model as
+        | string
+        | undefined;
+      const timings = (payload as Record<string, unknown>).timings_ms as
+        | Record<string, number>
+        | undefined;
+      const errors = (payload as Record<string, unknown>).errors as
+        | unknown[]
+        | undefined;
+      const hasFailed = Array.isArray(errors) && errors.length > 0;
+      const totalMs = timings?.total ?? timings?.llm ?? null;
+      return (
+        <button
+          key={t.id}
+          ref={isSelected ? selectedTraceRef : null}
+          onClick={() => onSelectedIdChange(t.id)}
+          className={[
+            "w-full text-left rounded-lg px-3 py-2 border transition-colors",
+            isSelected ? "bg-muted" : "bg-background hover:bg-muted/50",
+          ].join(" ")}
+        >
+          <div className="flex items-center gap-2 mb-1">
+            <span className="text-sm font-medium text-foreground flex-shrink-0">
+              Chat AI → Orch
+            </span>
+            <Badge className={`text-xs flex-shrink-0 ${hasFailed ? "bg-red-600 text-white" : "bg-green-600 text-white"}`}>
+              {hasFailed ? "Failed" : "Success"}
+            </Badge>
+          </div>
+          <div className="text-sm text-muted-foreground text-wrap">
+            AI generated response received by orchestration system
+            {model ? ` (${model})` : ""}
+            {totalMs != null ? ` · ${totalMs}ms` : ""}
+          </div>
+          <div className="mt-1 text-xs text-gray-400">{when}</div>
         </button>
       );
     }
@@ -1061,6 +1336,11 @@ export function LiveTab({
     violations?: Record<string, unknown>[];
     evaluation_time_ms?: number;
     evaluated_policies?: number;
+    // policy_check_request fields
+    envelope_type?: string;
+    action?: string;
+    context?: Record<string, unknown>;
+    dry_run?: boolean;
     [key: string]: unknown;
   };
   const traceType = selectedPayload?.type;
@@ -1068,7 +1348,9 @@ export function LiveTab({
   const isMessageApproved = traceType === "message_approved";
   const isHitlDecision = traceType === "hitl_decision";
   const isPolicyEvaluation = traceType === "policy_evaluation";
+  const isPolicyCheckRequest = traceType === "policy_check_request";
   const isClientMessage = traceType === "client_message";
+  const isLlmResponse = traceType === "llm_response_ready";
   const messageApprovedData = isMessageApproved
     ? {
         original_message: tryGet(selectedPayload, ["original_message"]),
@@ -1548,7 +1830,11 @@ export function LiveTab({
           </CardHeader>
           <CardContent className="pt-0">
             <ScrollArea ref={scrollAreaRef} className="h-full pr-3">
-              <div className="space-y-2">{traces.map(renderTraceRow)}</div>
+              <div className="space-y-2">
+                {[...traces]
+                  .sort((a, b) => b.createdAt - a.createdAt)
+                  .map(renderTraceRow)}
+              </div>
             </ScrollArea>
           </CardContent>
         </Card>
@@ -1563,11 +1849,7 @@ export function LiveTab({
               <Tabs defaultValue="request" className="w-full">
                 <TabsList className="grid w-full grid-cols-2 bg-muted/40">
                   {["request", "meta"].map((v) => (
-                    <TabsTrigger
-                      key={v}
-                      value={v}
-                      className={ACTIVE_TAB_CLS}
-                    >
+                    <TabsTrigger key={v} value={v} className={ACTIVE_TAB_CLS}>
                       {v[0].toUpperCase() + v.slice(1)}
                     </TabsTrigger>
                   ))}
@@ -1674,11 +1956,7 @@ export function LiveTab({
               <Tabs defaultValue="reply" className="w-full">
                 <TabsList className="grid w-full grid-cols-4 bg-muted/40">
                   {["reply", "routing", "mcp", "meta"].map((v) => (
-                    <TabsTrigger
-                      key={v}
-                      value={v}
-                      className={ACTIVE_TAB_CLS}
-                    >
+                    <TabsTrigger key={v} value={v} className={ACTIVE_TAB_CLS}>
                       {v[0].toUpperCase() + v.slice(1)}
                     </TabsTrigger>
                   ))}
@@ -1699,12 +1977,10 @@ export function LiveTab({
                           </div>
                           <div className="flex gap-2">
                             {(() => {
-                              const decision = selectedPayload
-                                .decision;
-                              const errorCode = selectedPayload
-                                .error_code;
-                              const editedContent = selectedPayload
-                                .edited_content;
+                              const decision = selectedPayload.decision;
+                              const errorCode = selectedPayload.error_code;
+                              const editedContent =
+                                selectedPayload.edited_content;
                               // 判断是否为人工审核
                               const reviewerLower = (
                                 selectedPayload.reviewer || ""
@@ -1787,14 +2063,18 @@ export function LiveTab({
 
                         {(() => {
                           const llmResp = selectedPayload.llm_response;
-                          const claudeReq = llmResp?.claude_request as Record<string, unknown> | undefined;
-                          const messages = claudeReq?.messages as Array<Record<string, unknown>> | undefined;
+                          const claudeReq = llmResp?.claude_request as
+                            | Record<string, unknown>
+                            | undefined;
+                          const messages = claudeReq?.messages as
+                            | Array<Record<string, unknown>>
+                            | undefined;
                           const lastUserMsg = messages?.length
                             ? messages[messages.length - 1]
                             : null;
                           const userContent =
                             lastUserMsg?.role === "user"
-                              ? lastUserMsg.content as string
+                              ? (lastUserMsg.content as string)
                               : null;
 
                           return userContent ? (
@@ -1814,8 +2094,12 @@ export function LiveTab({
 
                         {(() => {
                           const llmResp = selectedPayload.llm_response;
-                          const claudeReq = llmResp?.claude_request as Record<string, unknown> | undefined;
-                          const systemPrompt = claudeReq?.system as string | undefined;
+                          const claudeReq = llmResp?.claude_request as
+                            | Record<string, unknown>
+                            | undefined;
+                          const systemPrompt = claudeReq?.system as
+                            | string
+                            | undefined;
 
                           return systemPrompt &&
                             typeof systemPrompt === "string" ? (
@@ -1884,7 +2168,9 @@ export function LiveTab({
 
                         {(() => {
                           const llmResp = selectedPayload.llm_response;
-                          const usage = llmResp?.usage as { input_tokens?: number; output_tokens?: number } | undefined;
+                          const usage = llmResp?.usage as
+                            | { input_tokens?: number; output_tokens?: number }
+                            | undefined;
 
                           return usage ? (
                             <div>
@@ -1957,8 +2243,7 @@ export function LiveTab({
                                   size="sm"
                                   variant="outline"
                                   onClick={() => {
-                                    const data = selectedPayload
-                                      .llm_response;
+                                    const data = selectedPayload.llm_response;
                                     void navigator.clipboard.writeText(
                                       safeStringify(data),
                                     );
@@ -1970,9 +2255,7 @@ export function LiveTab({
                               </div>
                             </div>
                             <pre className="text-xs overflow-auto rounded-md bg-muted p-3 max-h-[400px]">
-                              {safeStringify(
-                                selectedPayload.llm_response,
-                              )}
+                              {safeStringify(selectedPayload.llm_response)}
                             </pre>
                           </div>
                         )}
@@ -1991,15 +2274,19 @@ export function LiveTab({
                     <CardContent className="pt-0">
                       {(() => {
                         const llmResp = selectedPayload.llm_response;
-                        const _meta = llmResp?._meta as Record<string, unknown> | undefined;
-                        const routing = _meta?.routing as {
-                          requires_mcp?: boolean;
-                          tools_available?: number | string;
-                          tools_used?: number;
-                          tool_use_rounds?: number;
-                          reason?: string;
-                          suggested_servers?: string[];
-                        } | undefined;
+                        const _meta = llmResp?._meta as
+                          | Record<string, unknown>
+                          | undefined;
+                        const routing = _meta?.routing as
+                          | {
+                              requires_mcp?: boolean;
+                              tools_available?: number | string;
+                              tools_used?: number;
+                              tool_use_rounds?: number;
+                              reason?: string;
+                              suggested_servers?: string[];
+                            }
+                          | undefined;
 
                         if (!routing) {
                           return (
@@ -2092,15 +2379,19 @@ export function LiveTab({
                     <CardContent className="pt-0">
                       {(() => {
                         const llmResp = selectedPayload.llm_response;
-                        const mcpMeta = llmResp?._meta as Record<string, unknown> | undefined;
-                        const mcpContext = mcpMeta?.mcp_context as {
-                          server_name?: string;
-                          tool?: string;
-                          duration_ms?: number;
-                          error?: string;
-                          args?: unknown;
-                          result?: unknown;
-                        }[] | undefined;
+                        const mcpMeta = llmResp?._meta as
+                          | Record<string, unknown>
+                          | undefined;
+                        const mcpContext = mcpMeta?.mcp_context as
+                          | {
+                              server_name?: string;
+                              tool?: string;
+                              duration_ms?: number;
+                              error?: string;
+                              args?: unknown;
+                              result?: unknown;
+                            }[]
+                          | undefined;
 
                         if (!mcpContext || mcpContext.length === 0) {
                           return (
@@ -2180,8 +2471,16 @@ export function LiveTab({
                       error_code: selectedPayload.error_code,
                       reviewer: selectedPayload.reviewer,
                       review_type: selectedPayload.review_type,
-                      enriched_at: (selectedPayload.llm_response?._meta as Record<string, unknown> | undefined)?.enriched_at,
-                      policy: (selectedPayload.llm_response?._meta as Record<string, unknown> | undefined)?.policy,
+                      enriched_at: (
+                        selectedPayload.llm_response?._meta as
+                          | Record<string, unknown>
+                          | undefined
+                      )?.enriched_at,
+                      policy: (
+                        selectedPayload.llm_response?._meta as
+                          | Record<string, unknown>
+                          | undefined
+                      )?.policy,
                     }}
                   />
                 </TabsContent>
@@ -2193,120 +2492,279 @@ export function LiveTab({
               <div className="space-y-4 mt-2">
                 <div className="rounded-lg border border-purple-500/30 bg-purple-500/10 p-3 space-y-2">
                   <div className="flex items-center gap-2">
-                    <Badge className="bg-purple-600 text-white text-xs">Auto Mode</Badge>
+                    <Badge className="bg-purple-600 text-white text-xs">
+                      Auto Mode
+                    </Badge>
                     <span className="text-xs text-muted-foreground ml-auto">
                       {selectedPayload.trace_id}
                     </span>
                   </div>
                 </div>
                 <JsonPanel title="Message" data={selectedPayload.message} />
-                {Array.isArray(selectedPayload.history) && selectedPayload.history.length > 0 && (
-                  <JsonPanel title="History" data={selectedPayload.history} />
-                )}
+                {Array.isArray(selectedPayload.history) &&
+                  selectedPayload.history.length > 0 && (
+                    <JsonPanel title="History" data={selectedPayload.history} />
+                  )}
                 {selectedPayload.meta != null && (
                   <JsonPanel title="Meta" data={selectedPayload.meta} />
                 )}
               </div>
             )}
 
-            {/* ── Policy Evaluation Detail ── */}
-            {isPolicyEvaluation && (() => {
-              const pe = selectedPayload as {
-                decision?: string;
-                passed?: boolean;
-                policy_type?: string;
-                summary?: string;
-                evaluation_time_ms?: number;
-                violations?: Array<{
-                  severity?: string;
-                  rule_name?: string;
-                  rule_id?: string;
-                  policy_name?: string;
-                  reason?: string;
-                  suggestion?: string;
-                }>;
-                trace_id?: string;
-                message_id?: string;
-              };
-              const isBlock = pe.decision === "BLOCK";
-              const isWarn = pe.decision === "WARN";
-
-              return (
-                <div className="space-y-4 mt-2">
-                  {/* Summary header */}
-                  <div className={[
-                    "rounded-lg border p-3 space-y-2",
-                    isBlock ? "border-red-500/50 bg-red-500/10"
-                      : isWarn ? "border-yellow-500/50 bg-yellow-500/10"
-                      : "border-green-500/50 bg-green-500/10"
-                  ].join(" ")}>
-                    <div className="flex items-center gap-2">
-                      {pe.passed ? (
-                        <ShieldCheck className="h-4 w-4 text-green-400" />
-                      ) : (
-                        <ShieldAlert className={`h-4 w-4 ${isBlock ? "text-red-400" : "text-yellow-400"}`} />
-                      )}
-                      <span className="text-sm font-medium capitalize">{pe.policy_type} Policy Check</span>
-                      <Badge className={
-                        isBlock ? "bg-red-500 text-white"
-                          : isWarn ? "bg-yellow-500 text-black"
-                          : "bg-green-500 text-white"
-                      }>
-                        {pe.decision}
-                      </Badge>
-                      {pe.evaluation_time_ms != null && (
-                        <span className="text-xs text-muted-foreground ml-auto">{pe.evaluation_time_ms}ms</span>
-                      )}
+            {/* ── Policy Check Request Detail ── */}
+            {isPolicyCheckRequest &&
+              (() => {
+                const pr = selectedPayload as {
+                  policy_type?: string;
+                  envelope_type?: string;
+                  action?: string;
+                  context?: Record<string, unknown>;
+                  payload?: Record<string, unknown>;
+                  dry_run?: boolean;
+                  trace_id?: string;
+                  message_id?: string;
+                };
+                const requestEnvelope = {
+                  jsonrpc: "2.0",
+                  id: pr.message_id,
+                  envelope_type: pr.envelope_type,
+                  params: {
+                    action: pr.action,
+                    context: pr.context ?? {},
+                    ...(pr.payload ? { payload: pr.payload } : {}),
+                    ...(pr.dry_run ? { dry_run: pr.dry_run } : {}),
+                  },
+                  _meta: {
+                    trace_id: pr.trace_id,
+                    message_id: pr.message_id,
+                  },
+                };
+                return (
+                  <div className="space-y-4 mt-2">
+                    <div className="rounded-lg border border-blue-500/50 bg-blue-500/10 p-3 space-y-2">
+                      <div className="flex items-center gap-2">
+                        <ShieldCheck className="h-4 w-4 text-blue-400" />
+                        <span className="text-sm font-medium capitalize">
+                          {pr.policy_type} Policy Check Request
+                        </span>
+                        <Badge className="bg-blue-600 text-white">
+                          {(pr.policy_type ?? "").toUpperCase()} CHECK
+                        </Badge>
+                        {pr.dry_run && (
+                          <Badge
+                            variant="outline"
+                            className="text-xs text-blue-300 border-blue-500/40 ml-auto"
+                          >
+                            DRY RUN
+                          </Badge>
+                        )}
+                      </div>
                     </div>
-                    {pe.summary && <p className="text-sm text-muted-foreground">{pe.summary}</p>}
+                    <JsonPanel
+                      title="Request Envelope"
+                      data={requestEnvelope}
+                    />
                   </div>
+                );
+              })()}
 
-                  {/* Violations list */}
-                  {pe.violations && pe.violations.length > 0 && (
-                    <div className="space-y-2">
-                      <div className="text-sm font-medium">Violations ({pe.violations.length})</div>
-                      {(pe.violations ?? []).map((v, idx: number) => (
-                        <div key={idx} className={[
-                          "rounded-lg border p-3 space-y-1.5",
-                          v.severity === "block" ? "border-red-500/30 bg-red-500/5"
-                            : v.severity === "warn" ? "border-yellow-500/30 bg-yellow-500/5"
-                            : "border-blue-500/30 bg-blue-500/5"
-                        ].join(" ")}>
-                          <div className="flex items-center gap-2">
-                            <Badge variant="outline" className={`text-[10px] px-1.5 py-0 ${
-                              v.severity === "block" ? "text-red-300 border-red-500/40"
-                                : v.severity === "warn" ? "text-yellow-300 border-yellow-500/40"
-                                : "text-blue-300 border-blue-500/40"
-                            }`}>
-                              {(v.severity || "info").toUpperCase()}
-                            </Badge>
-                            <span className="text-sm font-medium">{v.rule_name || v.rule_id}</span>
-                          </div>
-                          {v.policy_name && (
-                            <div className="text-xs text-muted-foreground">Policy: {v.policy_name}</div>
-                          )}
-                          <p className="text-sm">{v.reason}</p>
-                          {v.suggestion && (
-                            <p className="text-xs text-muted-foreground italic">Suggestion: {v.suggestion}</p>
-                          )}
-                        </div>
-                      ))}
+            {/* ── Policy Evaluation Detail ── */}
+            {isPolicyEvaluation &&
+              (() => {
+                const pe = selectedPayload as {
+                  decision?: string;
+                  passed?: boolean;
+                  policy_type?: string;
+                  summary?: string;
+                  evaluation_time_ms?: number;
+                  violations?: Array<{
+                    severity?: string;
+                    rule_name?: string;
+                    rule_id?: string;
+                    policy_name?: string;
+                    reason?: string;
+                    suggestion?: string;
+                  }>;
+                  trace_id?: string;
+                  message_id?: string;
+                };
+                const isBlock = pe.decision === "BLOCK";
+                const isWarn = pe.decision === "WARN";
+
+                return (
+                  <div className="space-y-4 mt-2">
+                    {/* Summary header */}
+                    <div
+                      className={[
+                        "rounded-lg border p-3 space-y-2",
+                        isBlock
+                          ? "border-red-500/50 bg-red-500/10"
+                          : isWarn
+                            ? "border-yellow-500/50 bg-yellow-500/10"
+                            : "border-green-500/50 bg-green-500/10",
+                      ].join(" ")}
+                    >
+                      <div className="flex items-center gap-2">
+                        {pe.passed ? (
+                          <ShieldCheck className="h-4 w-4 text-green-400" />
+                        ) : (
+                          <ShieldAlert
+                            className={`h-4 w-4 ${isBlock ? "text-red-400" : "text-yellow-400"}`}
+                          />
+                        )}
+                        <span className="text-sm font-medium capitalize">
+                          {pe.policy_type} Policy Check
+                        </span>
+                        <Badge
+                          className={
+                            isBlock
+                              ? "bg-red-500 text-white"
+                              : isWarn
+                                ? "bg-yellow-500 text-black"
+                                : "bg-green-500 text-white"
+                          }
+                        >
+                          {pe.decision}
+                        </Badge>
+                        {pe.evaluation_time_ms != null && (
+                          <span className="text-xs text-muted-foreground ml-auto">
+                            {pe.evaluation_time_ms}ms
+                          </span>
+                        )}
+                      </div>
+                      {pe.summary && (
+                        <p className="text-sm text-muted-foreground">
+                          {pe.summary}
+                        </p>
+                      )}
                     </div>
-                  )}
 
-                  {/* Metadata */}
-                  <JsonPanel title="Metadata" data={{
-                    trace_id: pe.trace_id,
-                    message_id: pe.message_id,
-                    policy_type: pe.policy_type,
-                    decision: pe.decision,
-                    passed: pe.passed,
-                    evaluation_time_ms: pe.evaluation_time_ms,
-                    violations_count: pe.violations?.length ?? 0,
-                  }} />
-                </div>
-              );
-            })()}
+                    {/* Violations list */}
+                    {pe.violations && pe.violations.length > 0 && (
+                      <div className="space-y-2">
+                        <div className="flex items-center justify-between">
+                          <div className="text-sm font-medium">
+                            Violations ({pe.violations.length})
+                          </div>
+                          <Button disabled>Modify</Button>
+                        </div>
+                        {(pe.violations ?? []).map((v, idx: number) => (
+                          <div
+                            key={idx}
+                            className={[
+                              "rounded-lg border p-3 space-y-1.5",
+                              v.severity === "block"
+                                ? "border-red-500/30 bg-red-500/5"
+                                : v.severity === "warn"
+                                  ? "border-yellow-500/30 bg-yellow-500/5"
+                                  : "border-blue-500/30 bg-blue-500/5",
+                            ].join(" ")}
+                          >
+                            <div className="flex items-center gap-2">
+                              <Badge
+                                variant="outline"
+                                className={`text-[10px] px-1.5 py-0 ${
+                                  v.severity === "block"
+                                    ? "text-red-300 border-red-500/40"
+                                    : v.severity === "warn"
+                                      ? "text-yellow-300 border-yellow-500/40"
+                                      : "text-blue-300 border-blue-500/40"
+                                }`}
+                              >
+                                {(v.severity || "info").toUpperCase()}
+                              </Badge>
+                              <span className="text-sm font-medium">
+                                {v.rule_name || v.rule_id}
+                              </span>
+                            </div>
+                            {v.policy_name && (
+                              <div className="text-xs text-muted-foreground">
+                                Policy: {v.policy_name}
+                              </div>
+                            )}
+                            <p className="text-sm">{v.reason}</p>
+                            {v.suggestion && (
+                              <p className="text-xs text-muted-foreground italic">
+                                Suggestion: {v.suggestion}
+                              </p>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
+                    {/* Response Envelope */}
+                    <JsonPanel
+                      title="Response Envelope"
+                      data={{
+                        jsonrpc: "2.0",
+                        id: pe.message_id,
+                        envelope_type: `policy.${pe.policy_type}`,
+                        result: {
+                          decision: pe.decision,
+                          passed: pe.passed,
+                          violations: pe.violations ?? [],
+                          summary: pe.summary,
+                          evaluation_time_ms: pe.evaluation_time_ms,
+                        },
+                      }}
+                    />
+                  </div>
+                );
+              })()}
+
+            {/* ── LLM Response Ready Detail ── */}
+            {isLlmResponse &&
+              (() => {
+                const lr = selectedPayload as {
+                  reply?: string;
+                  claude_model?: string;
+                  timings_ms?: Record<string, number>;
+                  original_message?: string;
+                  message_id?: string;
+                  trace_id?: string;
+                };
+                return (
+                  <div className="space-y-4 mt-2">
+                    <div className="rounded-lg border border-purple-500/50 bg-purple-500/10 p-3 space-y-2">
+                      <div className="flex items-center gap-2">
+                        <ArrowDownLeft className="h-4 w-4 text-purple-400" />
+                        <span className="text-sm font-medium">
+                          Chat AI → Orch
+                        </span>
+                        <Badge className="bg-purple-600 text-white">
+                          AI Response
+                        </Badge>
+                        {lr.claude_model && (
+                          <span className="text-xs text-muted-foreground ml-auto">
+                            {lr.claude_model}
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-sm text-muted-foreground">
+                        AI generated a response and sent it to the orchestration
+                        system for output governance.
+                      </p>
+                      {lr.timings_ms && (
+                        <div className="flex gap-3 text-xs text-muted-foreground">
+                          {Object.entries(lr.timings_ms).map(([k, v]) => (
+                            <span key={k}>
+                              {k}: {v}ms
+                            </span>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                    {lr.original_message && (
+                      <JsonPanel
+                        title="Original Message"
+                        data={lr.original_message}
+                      />
+                    )}
+                    {lr.reply && <JsonPanel title="AI Reply" data={lr.reply} />}
+                  </div>
+                );
+              })()}
           </CardContent>
         </Card>
       </div>

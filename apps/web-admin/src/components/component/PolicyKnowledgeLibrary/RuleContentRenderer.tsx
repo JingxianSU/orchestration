@@ -1,3 +1,5 @@
+// Rule Content Renderer - renders the extracted knowledge-base assets for a rule (RDR tree, KG, NN).
+// Used inside the Knowledge Base tab of the policy library to show trained model artefacts.
 import { useMemo, useState } from "react";
 import { BookOpen, Info, Code, Database } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
@@ -352,7 +354,7 @@ function extractRulesFromTree(
 function formatCondition(condition: {
   field: string;
   op: string;
-  value: any;
+  value: unknown;
 }): string {
   const { field, op, value } = condition;
   const fieldFormatted = field
@@ -380,7 +382,7 @@ function formatCondition(condition: {
   }
 }
 
-function formatValue(value: any): string {
+function formatValue(value: unknown): string {
   if (typeof value === "boolean") return value ? "True" : "False";
   if (value === null || value === undefined) return "null";
   if (typeof value === "string") return `"${value}"`;
