@@ -1,10 +1,17 @@
 """
-Client-facing API endpoints.
+Client router - endpoints for submitting messages and polling responses.
+
+Handles both manual-approval mode (message is queued for admin review) and
+auto-approval mode (input/output policy evaluation + Claude call run in the
+background, status returned immediately). Integrates with the message queue,
+event bus, policy engine, and provenance store.
 """
 from __future__ import annotations
 
 import asyncio
+import os
 import time
+import traceback
 import uuid
 from typing import Any, Dict
 
@@ -46,13 +53,26 @@ async def process_auto_approval_background(
     from models.chat import ChatRequest
     from models.envelopes import ClaudeRequestEnvelope
     from services.policy_engine import policy_engine
-    import os
-    
+
     try:
         print(f"[CLIENT-AUTO-BG] Starting background processing for {message_id}")
         
         # ========== STEP 1: Evaluate Input Policy ==========
         print(f"[CLIENT-AUTO-BG] Evaluating input policies...")
+        await event_bus.publish({
+            "type": "policy_check_request",
+            "trace_id": trace_id,
+            "ts": int(time.time() * 1000),
+            "data": {
+                "message_id": message_id,
+                "policy_type": "input",
+                "envelope_type": "policy.input",
+                "action": "message.input.evaluate",
+                "context": {"history": [h.model_dump() for h in req.history] if req.history else []},
+                "payload": {"content": req.message},
+                "dry_run": False,
+            }
+        })
         input_eval = await policy_engine.evaluate_content(
             content=req.message,
             policy_type="input",
@@ -240,6 +260,23 @@ async def process_auto_approval_background(
         
         # ========== STEP 3: Evaluate Output Policy ==========
         print(f"[CLIENT-AUTO-BG] Evaluating output policies...")
+        await event_bus.publish({
+            "type": "policy_check_request",
+            "trace_id": trace_id,
+            "ts": int(time.time() * 1000),
+            "data": {
+                "message_id": message_id,
+                "policy_type": "output",
+                "envelope_type": "policy.output",
+                "action": "message.output.evaluate",
+                "context": {
+                    "original_message": req.message,
+                    "history": [h.model_dump() for h in req.history] if req.history else []
+                },
+                "payload": {"content": chat_response.reply},
+                "dry_run": False,
+            }
+        })
         output_eval = await policy_engine.evaluate_content(
             content=chat_response.reply,
             policy_type="output",
@@ -373,7 +410,6 @@ async def process_auto_approval_background(
         print(f"[CLIENT-AUTO-BG] Auto-approval completed for {message_id}")
         
     except Exception as e:
-        import traceback
         print(f"[CLIENT-AUTO-BG] Error in background processing: {str(e)}")
         traceback.print_exc()
         
@@ -400,7 +436,8 @@ async def client_message(
         trace_id=trace_id,
         message=req.message,
         history=req.history,
-        timestamp=int(time.time() * 1000)
+        timestamp=int(time.time() * 1000),
+        component_id=req.component_id or None,
     )
 
     if req.auto_approve:
@@ -463,7 +500,8 @@ async def client_message(
             "history": [h.model_dump() for h in req.history] if req.history else [],
             "meta": {
                 "timestamp": client_msg.timestamp,
-                "message_id": message_id
+                "message_id": message_id,
+                "component_id": req.component_id or None,
             }
         }
     }
@@ -489,6 +527,20 @@ async def client_message(
         from services.policy_engine import policy_engine
         try:
             print(f"[CLIENT-MANUAL] Evaluating input policies for {message_id}...")
+            await event_bus.publish({
+                "type": "policy_check_request",
+                "trace_id": trace_id,
+                "ts": int(time.time() * 1000),
+                "data": {
+                    "message_id": message_id,
+                    "policy_type": "input",
+                    "envelope_type": "policy.input",
+                    "action": "message.input.evaluate",
+                    "context": {"history": [h.model_dump() for h in req.history] if req.history else []},
+                    "payload": {"content": req.message},
+                    "dry_run": False,
+                }
+            })
             input_eval = await policy_engine.evaluate_content(
                 content=req.message,
                 policy_type="input",
@@ -517,6 +569,20 @@ async def client_message(
                     "violations": [v.model_dump() for v in input_eval.violations],
                     "summary": input_eval.summary,
                     "evaluation_time_ms": input_eval.evaluation_time_ms
+                }
+            })
+
+            # Step 4a: Orch -> HITL (manual mode: message sent to admin for review)
+            await event_bus.publish({
+                "type": "hitl_request",
+                "trace_id": trace_id,
+                "ts": int(time.time() * 1000),
+                "data": {
+                    "message_id": message_id,
+                    "message": req.message,
+                    "input_policy_decision": input_eval.decision,
+                    "input_policy_passed": input_eval.passed,
+                    "timestamp": iso_utc_now(),
                 }
             })
         except Exception as e:

@@ -178,8 +178,7 @@ export function PolicyEngineConfig({
       const text = await file.text();
       const newPolicies = JSON.parse(text) as PolicyRuleV2[];
       setPolicies((prev) => [...prev, ...newPolicies]);
-    } catch (error) {
-      console.error("Failed to parse policy file:", error);
+    } catch {
       alert("Failed to upload policy file. Please check the format.");
     } finally {
       setUploading(false);

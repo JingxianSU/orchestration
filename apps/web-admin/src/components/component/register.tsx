@@ -33,6 +33,9 @@ import {
   Globe,
   Zap,
   FileCode,
+  Link,
+  Unlink,
+  ExternalLink,
 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import {
@@ -44,8 +47,10 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { PolicyEngineConfig } from "./policyEngineConfig";
+import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   Collapsible,
   CollapsibleContent,
@@ -127,9 +132,11 @@ interface MCPCategory {
 
 interface ExplanationTarget {
   name: string;
-  type: "module" | "tool" | "server";
+  type: "module" | "tool" | "server" | "external";
   explanation?: string;
   description?: string;
+  trustWorthys?: string[];
+  trustWorthyDescription?: string;
 }
 
 interface RegistryResponse {
@@ -169,11 +176,27 @@ interface RegisteredEngine {
   status: string;
   description: string;
   category: string;
-  categories: any[];
+  categories: unknown[];
   version: string;
   url: string;
   type: string;
-  policies: any[];
+  policies: unknown[];
+  created_at: number;
+  updated_at: number;
+}
+
+interface ExternalComponent {
+  id: string;
+  name: string;
+  description?: string;
+  connection_type: "http" | "ws" | "openclaw";
+  endpoint: string;
+  auth_token?: string;
+  status: string;
+  error_message?: string;
+  trustWorthys?: string[];
+  trustWorthyDescription?: string;
+  explanation?: string;
   created_at: number;
   updated_at: number;
 }
@@ -192,6 +215,12 @@ const STATUS_COLORS: Record<string, string> = {
   degraded: "bg-yellow-500/10 text-yellow-400 border-yellow-500/30",
   unknown: "bg-gray-500/10 text-gray-400 border-gray-500/30",
 };
+
+const TRUSTWORTHY_OPTIONS = [
+  { value: "interpretable", label: "Interpretable" },
+  { value: "explainable", label: "Explainable" },
+  { value: "case", label: "Case" },
+];
 
 function LLMConfigDialog({
   open,
@@ -227,7 +256,7 @@ function LLMConfigDialog({
           setMaxTokens(data.max_tokens);
           setApiKey("");
         })
-        .catch(console.error)
+        .catch(() => { /* ignore config fetch errors */ })
         .finally(() => setLoading(false));
     }
   }, [open, apiBase]);
@@ -276,8 +305,8 @@ function LLMConfigDialog({
       });
       onSaved();
       onOpenChange(false);
-    } catch (e) {
-      console.error("Failed to save:", e);
+    } catch {
+      // save error is non-critical; dialog stays open
     } finally {
       setSaving(false);
     }
@@ -451,71 +480,173 @@ function ExplanationDialog({
   open,
   onOpenChange,
   target,
-  onAskAI,
+  apiBase,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   target: ExplanationTarget | null;
-  onAskAI?: (target: ExplanationTarget) => void;
+  apiBase: string;
 }) {
+  const [aiText, setAiText] = React.useState<string>("");
+  const [loading, setLoading] = React.useState(false);
+  const [error, setError] = React.useState<string | null>(null);
+  const [editing, setEditing] = React.useState(false);
+
+  // Reset state when target changes
+  React.useEffect(() => {
+    if (target) {
+      setAiText(target.explanation?.trim() || "");
+      setEditing(false);
+      setError(null);
+    }
+  }, [target]);
+
   if (!target) return null;
 
-  const hasExplanation = target.explanation && target.explanation.trim() !== "";
+  const hasContent = aiText.trim() !== "";
+
+  const handleAskAI = async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const explainType = target.type === "external" ? "module" : target.type;
+      const res = await fetch(`${apiBase}/api/registry/explain`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: target.name,
+          type: explainType,
+          description: target.description,
+          explanation: aiText || undefined,
+        }),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      setAiText(data.explanation || "");
+      setEditing(false);
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : "Failed to get AI explanation");
+    } finally {
+      setLoading(false);
+    }
+  };
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-lg">
+      <DialogContent className="max-w-2xl max-h-[85vh] flex flex-col">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <HelpCircle className="h-5 w-5 text-blue-400" />
             {target.name}
           </DialogTitle>
           <DialogDescription>
-            {target.type === "module" && "Module Explanation"}
-            {target.type === "tool" && "Tool Explanation"}
-            {target.type === "server" && "MCP Server Explanation"}
+            {target.type === "module" && "Module — System Architecture & Trustworthy AI Role"}
+            {target.type === "tool" && "MCP Tool — System Architecture & Trustworthy AI Role"}
+            {target.type === "server" && "MCP Server — System Architecture & Trustworthy AI Role"}
+            {target.type === "external" && "External Component — System Architecture & Trustworthy AI Role"}
           </DialogDescription>
         </DialogHeader>
 
-        <div className="py-4">
+        <div className="flex-1 overflow-y-auto space-y-3 py-2">
+          {/* Description */}
           {target.description && (
-            <div className="mb-4 p-3 rounded-lg bg-muted/50">
-              <div className="text-xs text-muted-foreground mb-1">
-                Description
-              </div>
+            <div className="p-3 rounded-lg bg-muted/50">
+              <div className="text-xs text-muted-foreground mb-1">Description</div>
               <p className="text-sm">{target.description}</p>
             </div>
           )}
 
-          <div className="p-4 rounded-lg border border-dashed">
-            {hasExplanation ? (
-              <p className="text-sm whitespace-pre-wrap">
-                {target.explanation}
-              </p>
-            ) : (
-              <div className="text-center py-4">
-                <HelpCircle className="h-8 w-8 text-muted-foreground mx-auto mb-2" />
-                <p className="text-sm text-muted-foreground">
-                  Empty explanation
+          {(target.trustWorthys?.length || target.trustWorthyDescription) && (
+            <div className="p-3 rounded-lg bg-muted/50">
+              <div className="text-xs text-muted-foreground mb-2">Trustworthy</div>
+              {target.trustWorthys && target.trustWorthys.length > 0 && (
+                <div className="flex flex-wrap gap-2">
+                  {target.trustWorthys.map((item) => {
+                    const option = TRUSTWORTHY_OPTIONS.find((opt) => opt.value === item);
+                    return (
+                      <Badge key={item} variant="outline" className="text-xs">
+                        {option?.label || item}
+                      </Badge>
+                    );
+                  })}
+                </div>
+              )}
+              {target.trustWorthyDescription && (
+                <p className="text-sm mt-2 whitespace-pre-wrap">
+                  {target.trustWorthyDescription}
                 </p>
-                <p className="text-xs text-muted-foreground mt-1">
-                  No detailed explanation available for this {target.type}.
-                </p>
+              )}
+            </div>
+          )}
+
+          {/* AI Explanation area */}
+          <div className="rounded-lg border border-dashed">
+            {/* Header row */}
+            <div className="flex items-center justify-between px-3 pt-3 pb-2">
+              <div className="flex items-center gap-1.5">
+                <Sparkles className="h-3.5 w-3.5 text-purple-400" />
+                <span className="text-xs font-medium text-muted-foreground">AI Explanation</span>
               </div>
-            )}
+              {hasContent && !loading && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-6 px-2 text-xs"
+                  onClick={() => setEditing((v) => !v)}
+                >
+                  {editing ? "Preview" : "Edit"}
+                </Button>
+              )}
+            </div>
+
+            {/* Content */}
+            <div className="px-3 pb-3">
+              {loading ? (
+                <div className="flex flex-col items-center justify-center py-10 gap-3">
+                  <Loader2 className="h-6 w-6 animate-spin text-purple-400" />
+                  <p className="text-sm text-muted-foreground">Asking AI about {target.name}...</p>
+                </div>
+              ) : error ? (
+                <div className="text-sm text-destructive py-2">{error}</div>
+              ) : hasContent ? (
+                editing ? (
+                  <Textarea
+                    value={aiText}
+                    onChange={(e) => setAiText(e.target.value)}
+                    className="text-sm min-h-[200px] font-mono"
+                    placeholder="Edit the explanation..."
+                  />
+                ) : (
+                  <p className="text-sm whitespace-pre-wrap leading-relaxed">{aiText}</p>
+                )
+              ) : (
+                <div className="text-center py-8">
+                  <Sparkles className="h-8 w-8 text-muted-foreground/40 mx-auto mb-2" />
+                  <p className="text-sm text-muted-foreground">No explanation yet.</p>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    Click <span className="font-medium">Ask AI</span> to generate one.
+                  </p>
+                </div>
+              )}
+            </div>
           </div>
         </div>
 
-        <DialogFooter className="flex gap-2">
+        <DialogFooter className="flex gap-2 pt-2 border-t">
           <Button variant="outline" onClick={() => onOpenChange(false)}>
             Close
           </Button>
           <Button
-            onClick={() => onAskAI?.(target)}
-            className="bg-gradient-to-r from-purple-500 to-blue-500 hover:from-purple-600 hover:to-blue-600"
+            onClick={handleAskAI}
+            disabled={loading}
+            className="bg-gradient-to-r from-purple-500 to-blue-500 hover:from-purple-600 hover:to-blue-600 text-white"
           >
-            <Sparkles className="h-4 w-4 mr-2" />
-            Ask AI
+            {loading ? (
+              <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+            ) : (
+              <Sparkles className="h-4 w-4 mr-2" />
+            )}
+            {hasContent ? "Regenerate" : "Ask AI"}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -583,7 +714,7 @@ function DatabaseConfigDialog({
           setCollection(data.collection);
           setUri("");
         })
-        .catch(console.error)
+        .catch(() => { /* ignore config fetch errors */ })
         .finally(() => setLoading(false));
     }
   }, [open, apiBase]);
@@ -634,8 +765,8 @@ function DatabaseConfigDialog({
       });
       onSaved();
       onOpenChange(false);
-    } catch (e) {
-      console.error("Failed to save:", e);
+    } catch {
+      // save error is non-critical; dialog stays open
     } finally {
       setSaving(false);
     }
@@ -829,6 +960,92 @@ export function RegisterListTab({ apiBase }: { apiBase: string }) {
   const [serverToDelete, setServerToDelete] =
     React.useState<MCPServerWithTools | null>(null);
 
+  // ── External Components state ──────────────────────────────────────────────
+  const [externalComponents, setExternalComponents] = React.useState<ExternalComponent[]>([]);
+  const [isAddExternalOpen, setIsAddExternalOpen] = React.useState(false);
+  const [externalToDelete, setExternalToDelete] = React.useState<ExternalComponent | null>(null);
+  const [testingExternal, setTestingExternal] = React.useState<string | null>(null);
+  const [newExternal, setNewExternal] = React.useState({
+    name: "",
+    description: "",
+    connection_type: "http" as "http" | "ws" | "openclaw",
+    endpoint: "",
+    auth_token: "",
+    trustWorthys: [] as string[],
+    trustWorthyDescription: "",
+  });
+
+  const fetchExternalComponents = React.useCallback(async () => {
+    try {
+      const res = await fetch(`${apiBase}/api/external/components`);
+      if (res.ok) {
+        const data = await res.json();
+        setExternalComponents(data);
+      }
+    } catch {
+      // ignore network errors
+    }
+  }, [apiBase]);
+
+  React.useEffect(() => {
+    void fetchExternalComponents();
+  }, [fetchExternalComponents]);
+
+  const handleRegisterExternal = async () => {
+    try {
+      const res = await fetch(`${apiBase}/api/external/components`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: newExternal.name,
+          description: newExternal.description || undefined,
+          connection_type: newExternal.connection_type,
+          endpoint: newExternal.endpoint,
+          auth_token: newExternal.auth_token || undefined,
+          trustWorthys: newExternal.trustWorthys.length > 0 ? newExternal.trustWorthys : undefined,
+          trustWorthyDescription: newExternal.trustWorthyDescription || undefined,
+        }),
+      });
+      if (res.ok) {
+        await fetchExternalComponents();
+        setIsAddExternalOpen(false);
+        setNewExternal({
+          name: "",
+          description: "",
+          connection_type: "http",
+          endpoint: "",
+          auth_token: "",
+          trustWorthys: [],
+          trustWorthyDescription: "",
+        });
+      }
+    } catch {
+      // ignore errors
+    }
+  };
+
+  const handleDeleteExternal = async (id: string) => {
+    try {
+      await fetch(`${apiBase}/api/external/components/${id}`, { method: "DELETE" });
+      await fetchExternalComponents();
+      setExternalToDelete(null);
+    } catch {
+      // ignore errors
+    }
+  };
+
+  const handleTestExternal = async (id: string) => {
+    setTestingExternal(id);
+    try {
+      await fetch(`${apiBase}/api/external/components/${id}/test`, { method: "POST" });
+      await fetchExternalComponents();
+    } catch {
+      // ignore errors
+    } finally {
+      setTestingExternal(null);
+    }
+  };
+
   const fetchRegistry = React.useCallback(async () => {
     setLoading(true);
     try {
@@ -869,8 +1086,8 @@ export function RegisterListTab({ apiBase }: { apiBase: string }) {
           setExpandedServers(new Set(serversWithTools));
         }
       }
-    } catch (e) {
-      console.error("Error fetching registry:", e);
+    } catch {
+      // ignore network errors for registry fetch
     } finally {
       setLoading(false);
     }
@@ -902,8 +1119,8 @@ export function RegisterListTab({ apiBase }: { apiBase: string }) {
         },
       );
       await fetchRegistry();
-    } catch (e) {
-      console.error("Failed to toggle server:", e);
+    } catch {
+      // ignore toggle server errors
     }
   };
 
@@ -922,8 +1139,8 @@ export function RegisterListTab({ apiBase }: { apiBase: string }) {
         },
       );
       await fetchRegistry();
-    } catch (e) {
-      console.error("Failed to toggle tool:", e);
+    } catch {
+      // ignore toggle tool errors
     }
   };
 
@@ -944,8 +1161,8 @@ export function RegisterListTab({ apiBase }: { apiBase: string }) {
         setIsAddMCPDialogOpen(false);
         setNewMCPServer({ name: "", script_path: "", description: "" });
       }
-    } catch (e) {
-      console.error("Failed to register MCP server:", e);
+    } catch {
+      // ignore register MCP server errors
     }
   };
 
@@ -956,8 +1173,8 @@ export function RegisterListTab({ apiBase }: { apiBase: string }) {
       });
       await fetchRegistry();
       setServerToDelete(null);
-    } catch (e) {
-      console.error("Failed to delete server:", e);
+    } catch {
+      // ignore delete server errors
     }
   };
 
@@ -985,9 +1202,6 @@ export function RegisterListTab({ apiBase }: { apiBase: string }) {
     setIsExplanationOpen(true);
   };
 
-  const handleAskAI = (target: ExplanationTarget) => {
-    alert(`Ask AI about: ${target.name}`);
-  };
 
   const mockPolicyEngines: RegisteredEngine[] = [
     {
@@ -1143,7 +1357,7 @@ export function RegisterListTab({ apiBase }: { apiBase: string }) {
     try {
       // 使用模拟数据而不是API调用
       await new Promise((resolve) => setTimeout(resolve, 500));
-    } catch (e: any) {
+    } catch {
     } finally {
     }
   }, [apiBase]);
@@ -1166,28 +1380,19 @@ export function RegisterListTab({ apiBase }: { apiBase: string }) {
     setTimeout(() => {}, 500);
   }, [isEngineModalOpen, apiBase, mockPolicyEngines]);
 
-  if (!registry) {
-    return (
-      <div className="flex items-center justify-center py-12">
-        <RefreshCw className="h-6 w-6 animate-spin mr-2" />
-        <span>Loading registry...</span>
-      </div>
-    );
-  }
-
   return (
     <div className="space-y-6">
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
         <Card>
           <CardContent className="p-4">
-            <div className="text-2xl font-bold">{registry.total_modules}</div>
+            <div className="text-2xl font-bold">{registry?.total_modules ?? "—"}</div>
             <div className="text-sm text-muted-foreground">Total Modules</div>
           </CardContent>
         </Card>
         <Card>
           <CardContent className="p-4">
             <div className="text-2xl font-bold text-blue-400">
-              {registry.mcp?.servers.length || 0}
+              {registry?.mcp?.servers.length ?? "—"}
             </div>
             <div className="text-sm text-muted-foreground">MCP Servers</div>
           </CardContent>
@@ -1195,7 +1400,7 @@ export function RegisterListTab({ apiBase }: { apiBase: string }) {
         <Card>
           <CardContent className="p-4">
             <div className="text-2xl font-bold text-purple-400">
-              {registry.total_tools}
+              {registry?.total_tools ?? "—"}
             </div>
             <div className="text-sm text-muted-foreground">Total Tools</div>
           </CardContent>
@@ -1203,7 +1408,7 @@ export function RegisterListTab({ apiBase }: { apiBase: string }) {
         <Card>
           <CardContent className="p-4">
             <div className="text-2xl font-bold text-green-400">
-              {registry.mcp?.enabled_tools || 0}
+              {registry?.mcp?.enabled_tools ?? "—"}
             </div>
             <div className="text-sm text-muted-foreground">Enabled Tools</div>
           </CardContent>
@@ -1234,8 +1439,14 @@ export function RegisterListTab({ apiBase }: { apiBase: string }) {
       {/* System Categories */}
       <div className="space-y-4">
         <h2 className="text-lg font-semibold">System Components</h2>
+        {!registry && (
+          <div className="flex items-center gap-2 text-sm text-muted-foreground py-4">
+            <RefreshCw className="h-4 w-4 animate-spin" />
+            <span>Loading system components...</span>
+          </div>
+        )}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-          {registry.categories.map((category) => (
+          {(registry?.categories ?? []).map((category) => (
             <Card key={category.id} className="flex flex-col">
               <CardHeader className="pb-3 shrink-0">
                 <div className="flex items-center gap-2">
@@ -1340,7 +1551,7 @@ export function RegisterListTab({ apiBase }: { apiBase: string }) {
             <CardContent className="pt-0 flex-1 overflow-y-auto max-h-[300px]">
               <div className="space-y-2">
                 {/* MCP Servers Section */}
-                {registry.mcp && registry.mcp.servers.length > 0 ? (
+                {registry?.mcp && registry.mcp.servers.length > 0 ? (
                   registry.mcp.servers.map((server) => {
                     const isExpanded = expandedServers.has(server.server_id);
                     const filteredTools = filterTools(server.tools);
@@ -1481,6 +1692,7 @@ export function RegisterListTab({ apiBase }: { apiBase: string }) {
                                             checked,
                                           )
                                         }
+                                        className="data-[state=unchecked]:bg-zinc-600 data-[state=checked]:bg-zinc-200 data-[state=checked]:border-black data-[state=unchecked]:border-black"
                                       />
                                     </div>
                                   ))}
@@ -1513,6 +1725,105 @@ export function RegisterListTab({ apiBase }: { apiBase: string }) {
         </div>
       </div>
 
+      {/* External Components Section */}
+      <div className="space-y-4">
+        <div className="flex items-center justify-between">
+          <h2 className="text-lg font-semibold">External Components</h2>
+          <Button size="sm" onClick={() => setIsAddExternalOpen(true)}>
+            <Plus className="h-4 w-4 mr-1" />
+            Register Component
+          </Button>
+        </div>
+
+        {externalComponents.length === 0 ? (
+          <Card>
+            <CardContent className="flex flex-col items-center justify-center py-10 text-center">
+              <ExternalLink className="h-10 w-10 text-muted-foreground mb-3" />
+              <p className="text-sm font-medium text-muted-foreground">No external components registered</p>
+              <p className="text-xs text-muted-foreground mt-1 max-w-xs">
+                Register an external project or component to route chat messages through it with governance applied.
+              </p>
+              <Button variant="link" size="sm" className="mt-2" onClick={() => setIsAddExternalOpen(true)}>
+                Register your first component
+              </Button>
+            </CardContent>
+          </Card>
+        ) : (
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            {externalComponents.map((comp) => (
+              <Card key={comp.id}>
+                <CardContent className="p-4 space-y-3">
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="font-medium text-sm">{comp.name}</span>
+                        <Badge
+                          variant="outline"
+                          className={STATUS_COLORS[comp.status] || STATUS_COLORS.unknown}
+                        >
+                          {comp.status}
+                        </Badge>
+                        <Badge variant="outline" className="text-xs font-mono uppercase">
+                          {comp.connection_type}
+                        </Badge>
+                      </div>
+                      {comp.description && (
+                        <p className="text-xs text-muted-foreground mt-0.5 truncate">{comp.description}</p>
+                      )}
+                      <p className="text-xs text-muted-foreground font-mono mt-1 truncate">{comp.endpoint}</p>
+                      {comp.error_message && (
+                        <p className="text-xs text-red-400 mt-1 truncate">{comp.error_message}</p>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-1 shrink-0">
+                      <HelpIconButton
+                        onClick={() =>
+                          handleOpenExplanation({
+                            name: comp.name,
+                            type: "external",
+                            description: comp.description,
+                            explanation: comp.explanation,
+                            trustWorthys: comp.trustWorthys,
+                            trustWorthyDescription: comp.trustWorthyDescription,
+                          })
+                        }
+                      />
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-7 px-2"
+                        disabled={testingExternal === comp.id}
+                        onClick={() => handleTestExternal(comp.id)}
+                        title="Test connection"
+                      >
+                        {testingExternal === comp.id ? (
+                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                        ) : comp.status === "connected" ? (
+                          <Link className="h-3.5 w-3.5 text-green-400" />
+                        ) : (
+                          <Unlink className="h-3.5 w-3.5" />
+                        )}
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-7 px-2 text-destructive hover:text-destructive"
+                        onClick={() => setExternalToDelete(comp)}
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </Button>
+                    </div>
+                  </div>
+                  <div className="text-xs text-muted-foreground">
+                    ID: <span className="font-mono">{comp.id}</span>
+                  </div>
+                </CardContent>
+              </Card>
+            ))}
+          </div>
+        )}
+      </div>
+
       {/* Config Dialogs */}
       <LLMConfigDialog
         open={isLLMConfigOpen}
@@ -1539,7 +1850,7 @@ export function RegisterListTab({ apiBase }: { apiBase: string }) {
         open={isExplanationOpen}
         onOpenChange={setIsExplanationOpen}
         target={explanationTarget}
-        onAskAI={handleAskAI}
+        apiBase={apiBase}
       />
 
       {/* Add External Tool Dialog */}
@@ -1857,6 +2168,184 @@ export function RegisterListTab({ apiBase }: { apiBase: string }) {
               }
             >
               Delete Server
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Register External Component Dialog */}
+      <Dialog open={isAddExternalOpen} onOpenChange={setIsAddExternalOpen}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <ExternalLink className="h-5 w-5" />
+              Register External Component
+            </DialogTitle>
+            <DialogDescription>
+              Register an external project or service. Messages from Chat Simulation will be
+              governed and forwarded to this component's HTTP endpoint.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div className="space-y-2">
+              <Label htmlFor="ext-name">Name</Label>
+              <Input
+                id="ext-name"
+                placeholder="e.g., OpenClaw, My Agent"
+                value={newExternal.name}
+                onChange={(e) => setNewExternal({ ...newExternal, name: e.target.value })}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>Connection Type</Label>
+              <div className="flex gap-2">
+                {(["http", "ws", "openclaw"] as const).map((t) => (
+                  <button
+                    key={t}
+                    type="button"
+                    onClick={() => setNewExternal({ ...newExternal, connection_type: t })}
+                    className={[
+                      "flex-1 rounded-md border px-3 py-1.5 text-sm font-mono transition-colors",
+                      newExternal.connection_type === t
+                        ? "border-primary bg-primary/10 text-primary"
+                        : "border-border text-muted-foreground hover:border-primary/50",
+                    ].join(" ")}
+                  >
+                    {t === "openclaw" ? "OpenClaw" : t.toUpperCase()}
+                  </button>
+                ))}
+              </div>
+              <p className="text-xs text-muted-foreground">
+                {newExternal.connection_type === "http"
+                  ? "HTTP: endpoint receives POST with { message, trace_id } and returns { reply }"
+                  : newExternal.connection_type === "ws"
+                  ? "WebSocket: server receives JSON { message, trace_id } and sends back { reply }"
+                  : "OpenClaw: connects to an OpenClaw Gateway using the proprietary WS protocol with device pairing"}
+              </p>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="ext-endpoint">
+                {newExternal.connection_type === "http"
+                  ? "HTTP"
+                  : newExternal.connection_type === "ws"
+                  ? "WebSocket"
+                  : "OpenClaw Gateway WS"}{" "}
+                Endpoint
+              </Label>
+              <Input
+                id="ext-endpoint"
+                placeholder={
+                  newExternal.connection_type === "http"
+                    ? "http://localhost:3000/chat"
+                    : newExternal.connection_type === "ws"
+                    ? "ws://localhost:3000/ws"
+                    : "ws://127.0.0.1:18789"
+                }
+                value={newExternal.endpoint}
+                onChange={(e) => setNewExternal({ ...newExternal, endpoint: e.target.value })}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="ext-auth">Bearer Token (Optional)</Label>
+              <Input
+                id="ext-auth"
+                type="password"
+                placeholder="Leave empty if no auth required"
+                value={newExternal.auth_token}
+                onChange={(e) => setNewExternal({ ...newExternal, auth_token: e.target.value })}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>Trustworthy Options</Label>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                {TRUSTWORTHY_OPTIONS.map((option) => {
+                  const checked = newExternal.trustWorthys.includes(option.value);
+                  return (
+                    <label key={option.value} className="flex items-center gap-2 text-sm">
+                      <Checkbox
+                        checked={checked}
+                        onCheckedChange={(value) => {
+                          const isChecked = value === true;
+                          setNewExternal((prev) => ({
+                            ...prev,
+                            trustWorthys: isChecked
+                              ? [...prev.trustWorthys, option.value]
+                              : prev.trustWorthys.filter((item) => item !== option.value),
+                          }));
+                        }}
+                      />
+                      <span>{option.label}</span>
+                    </label>
+                  );
+                })}
+              </div>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="ext-trust-desc">Trustworthy Description (Optional)</Label>
+              <Textarea
+                id="ext-trust-desc"
+                placeholder="Describe the trustworthy aspects of this component"
+                value={newExternal.trustWorthyDescription}
+                onChange={(e) =>
+                  setNewExternal({ ...newExternal, trustWorthyDescription: e.target.value })
+                }
+                className="min-h-[90px]"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="ext-desc">Description (Optional)</Label>
+              <Input
+                id="ext-desc"
+                placeholder="Brief description of this component"
+                value={newExternal.description}
+                onChange={(e) => setNewExternal({ ...newExternal, description: e.target.value })}
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => {
+                setIsAddExternalOpen(false);
+                setNewExternal({
+                  name: "",
+                  description: "",
+                  connection_type: "http",
+                  endpoint: "",
+                  auth_token: "",
+                  trustWorthys: [],
+                  trustWorthyDescription: "",
+                });
+              }}
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={handleRegisterExternal}
+              disabled={!newExternal.name || !newExternal.endpoint}
+            >
+              Register
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Delete External Component Dialog */}
+      <Dialog open={!!externalToDelete} onOpenChange={() => setExternalToDelete(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Remove External Component</DialogTitle>
+            <DialogDescription>
+              Are you sure you want to remove "{externalToDelete?.name}"?
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setExternalToDelete(null)}>Cancel</Button>
+            <Button
+              variant="destructive"
+              onClick={() => externalToDelete && handleDeleteExternal(externalToDelete.id)}
+            >
+              Remove
             </Button>
           </DialogFooter>
         </DialogContent>

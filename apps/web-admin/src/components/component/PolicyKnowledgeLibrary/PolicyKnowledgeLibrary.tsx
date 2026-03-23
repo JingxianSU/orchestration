@@ -1,5 +1,8 @@
-import { useState, useMemo } from "react";
-import { Search, X, FileText, Plus, ArrowUpDown } from "lucide-react";
+// Policy Knowledge Library - main list/filter view for browsing and searching policy rules.
+// Fetches rules from the backend API (GET /api/knowledge-rules).
+// Supports create, edit, and delete via API.
+import { useState, useMemo, useEffect, useCallback } from "react";
+import { Search, X, FileText, Plus, ArrowUpDown, Loader2 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -15,15 +18,64 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { cn } from "@/lib/utils";
 
 import type { Rule, FilterOptions, FilterState } from "./types";
-import { DEFAULT_FILTER_OPTIONS, MOCK_RULES } from "./constants";
+import { DEFAULT_FILTER_OPTIONS } from "./constants";
 import FilterPanel from "./FilterPanel";
 import RuleCard from "./RuleCard";
 import RuleDetailDrawer from "./RuleDetailDrawer";
-import NewRuleDialog from "./NewRuleDialog";
-import EditRuleDialog from "./EditRuleDialog";
+import RuleFormDialog from "./RuleFormDialog";
+
+const API_BASE = "/api/knowledge-rules";
+
+async function fetchRules(filters: FilterState, sortBy: string): Promise<Rule[]> {
+  const params = new URLSearchParams();
+  filters.domains.forEach((v) => params.append("domain", v));
+  filters.jurisdictions.forEach((v) => params.append("jurisdiction", v));
+  filters.intentTypes.forEach((v) => params.append("intent_type", v));
+  filters.scopes.forEach((v) => params.append("scope", v));
+  filters.enforcements.forEach((v) => params.append("enforcement", v));
+  filters.strengths.forEach((v) => params.append("strength", v));
+  filters.statuses.forEach((v) => params.append("status", v));
+  filters.inferenceModels.forEach((v) => params.append("inference_model", v));
+  filters.trustWorthys.forEach((v) => params.append("trust_worthy", v));
+  if (filters.search) params.set("search", filters.search);
+  params.set("sort_by", sortBy);
+
+  const res = await fetch(`${API_BASE}?${params.toString()}`);
+  if (!res.ok) throw new Error(`Failed to fetch rules: ${res.status}`);
+  return res.json();
+}
+
+async function createRule(data: Partial<Rule>): Promise<Rule> {
+  const res = await fetch(API_BASE, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data),
+  });
+  if (!res.ok) throw new Error(`Failed to create rule: ${res.status}`);
+  return res.json();
+}
+
+async function updateRule(id: string, data: Partial<Rule>): Promise<Rule> {
+  const res = await fetch(`${API_BASE}/${id}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data),
+  });
+  if (!res.ok) throw new Error(`Failed to update rule: ${res.status}`);
+  return res.json();
+}
+
+async function deleteRule(id: string): Promise<void> {
+  const res = await fetch(`${API_BASE}/${id}`, { method: "DELETE" });
+  if (!res.ok) throw new Error(`Failed to delete rule: ${res.status}`);
+}
 
 // ============ Main Component ============
 export default function PolicyKnowledgeLibrary() {
+  const [rules, setRules] = useState<Rule[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
   const [filters, setFilters] = useState<FilterState>({
     domains: [],
     jurisdictions: [],
@@ -43,101 +95,34 @@ export default function PolicyKnowledgeLibrary() {
 
   const [selectedRule, setSelectedRule] = useState<Rule | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
-  const [viewMode, _setViewMode] = useState<"list" | "grid">("list");
+  const viewMode = "list" as const;
   const [sortBy, setSortBy] = useState<string>("lastModified");
 
-  // New Rule dialog state
   const [newRuleDialogOpen, setNewRuleDialogOpen] = useState(false);
-
-  // Edit Rule dialog state
   const [editRuleDialogOpen, setEditRuleDialogOpen] = useState(false);
   const [editingRule, setEditingRule] = useState<Rule | null>(null);
 
-  const filteredRules = useMemo(() => {
-    return MOCK_RULES.filter((rule) => {
-      if (filters.search) {
-        const searchLower = filters.search.toLowerCase();
-        const matchesSearch =
-          rule.title.toLowerCase().includes(searchLower) ||
-          rule.summary.toLowerCase().includes(searchLower) ||
-          rule.id.toLowerCase().includes(searchLower);
-        if (!matchesSearch) return false;
-      }
+  // ---- Data fetching ----
+  const loadRules = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const data = await fetchRules(filters, sortBy);
+      setRules(data);
+    } catch (e: any) {
+      setError(e.message || "Failed to load rules");
+    } finally {
+      setLoading(false);
+    }
+  }, [filters, sortBy]);
 
-      if (
-        filters.domains.length > 0 &&
-        !filters.domains.some((d) => rule.domain.includes(d))
-      ) {
-        return false;
-      }
+  useEffect(() => {
+    loadRules();
+  }, [loadRules]);
 
-      if (
-        filters.jurisdictions.length > 0 &&
-        !filters.jurisdictions.some((j) => rule.jurisdiction.includes(j))
-      ) {
-        return false;
-      }
-
-      // Intent type filter
-      if (
-        filters.intentTypes.length > 0 &&
-        !filters.intentTypes.includes(rule.intentType)
-      ) {
-        return false;
-      }
-
-      // Scope filter
-      if (filters.scopes.length > 0 && !filters.scopes.includes(rule.scope)) {
-        return false;
-      }
-
-      // Enforcement filter
-      if (
-        filters.enforcements.length > 0 &&
-        !filters.enforcements.includes(rule.enforcement)
-      ) {
-        return false;
-      }
-
-      // Strength filter
-      if (
-        filters.strengths.length > 0 &&
-        !filters.strengths.includes(rule.strength)
-      ) {
-        return false;
-      }
-
-      // Status filter
-      if (
-        filters.statuses.length > 0 &&
-        !filters.statuses.includes(rule.status)
-      ) {
-        return false;
-      }
-
-      // Inference Model filter
-      if (
-        filters.inferenceModels.length > 0 &&
-        !filters.inferenceModels.includes(rule.inferenceModel)
-      ) {
-        return false;
-      }
-
-      // Trust Worthy filter
-      if (
-        filters.trustWorthys.length > 0 &&
-        !filters.trustWorthys.includes(rule.trustWorthy)
-      ) {
-        return false;
-      }
-
-      return true;
-    });
-  }, [filters]);
-
-  // Sort rules
+  // ---- Client-side sort (backend returns pre-sorted, this is a safety net) ----
   const sortedRules = useMemo(() => {
-    return [...filteredRules].sort((a, b) => {
+    return [...rules].sort((a, b) => {
       switch (sortBy) {
         case "lastModified":
           return (
@@ -148,10 +133,7 @@ export default function PolicyKnowledgeLibrary() {
           return a.title.localeCompare(b.title);
         case "riskLevel": {
           const riskOrder: Record<string, number> = {
-            critical: 0,
-            high: 1,
-            medium: 2,
-            low: 3,
+            critical: 0, high: 1, medium: 2, low: 3,
           };
           return (riskOrder[a.riskLevel] ?? 4) - (riskOrder[b.riskLevel] ?? 4);
         }
@@ -159,11 +141,48 @@ export default function PolicyKnowledgeLibrary() {
           return 0;
       }
     });
-  }, [filteredRules, sortBy]);
+  }, [rules, sortBy]);
 
+  // ---- Handlers ----
   const handleRuleClick = (rule: Rule) => {
     setSelectedRule(rule);
     setDrawerOpen(true);
+  };
+
+  const handleCreate = async (ruleData: Partial<Rule>) => {
+    try {
+      const created = await createRule(ruleData);
+      setRules((prev) => [created, ...prev]);
+      setNewRuleDialogOpen(false);
+    } catch (e: any) {
+      console.error("Create rule failed:", e);
+    }
+  };
+
+  const handleEdit = async (ruleData: Partial<Rule>) => {
+    if (!editingRule) return;
+    try {
+      const updated = await updateRule(editingRule.id, ruleData);
+      setRules((prev) => prev.map((r) => (r.id === updated.id ? updated : r)));
+      if (selectedRule?.id === updated.id) setSelectedRule(updated);
+      setEditRuleDialogOpen(false);
+      setEditingRule(null);
+    } catch (e: any) {
+      console.error("Update rule failed:", e);
+    }
+  };
+
+  const handleDelete = async (rule: Rule) => {
+    try {
+      await deleteRule(rule.id);
+      setRules((prev) => prev.filter((r) => r.id !== rule.id));
+      if (selectedRule?.id === rule.id) {
+        setSelectedRule(null);
+        setDrawerOpen(false);
+      }
+    } catch (e: any) {
+      console.error("Delete rule failed:", e);
+    }
   };
 
   return (
@@ -207,12 +226,18 @@ export default function PolicyKnowledgeLibrary() {
                 />
               </div>
               <span className="text-sm text-gray-600">
-                <span className="font-medium">{sortedRules.length}</span> result
-                found
+                {loading ? (
+                  <Loader2 className="h-4 w-4 animate-spin inline" />
+                ) : (
+                  <>
+                    <span className="font-medium">{sortedRules.length}</span>{" "}
+                    result{sortedRules.length !== 1 ? "s" : ""} found
+                  </>
+                )}
               </span>
 
               {/* Active filter tags */}
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 flex-wrap">
                 {filters.domains.map((d) => (
                   <Badge
                     key={d}
@@ -225,8 +250,7 @@ export default function PolicyKnowledgeLibrary() {
                       })
                     }
                   >
-                    {filterOptions.domains.find((dom) => dom.value === d)
-                      ?.label || d}
+                    {filterOptions.domains.find((dom) => dom.value === d)?.label || d}
                     <X className="h-3 w-3" />
                   </Badge>
                 ))}
@@ -242,8 +266,7 @@ export default function PolicyKnowledgeLibrary() {
                       })
                     }
                   >
-                    {filterOptions.statuses.find((st) => st.value === s)
-                      ?.label || s}
+                    {filterOptions.statuses.find((st) => st.value === s)?.label || s}
                     <X className="h-3 w-3" />
                   </Badge>
                 ))}
@@ -251,7 +274,6 @@ export default function PolicyKnowledgeLibrary() {
             </div>
 
             <div className="flex items-center gap-3">
-              {/* Sort */}
               <Select value={sortBy} onValueChange={setSortBy}>
                 <SelectTrigger className="w-[180px] h-9">
                   <ArrowUpDown className="h-4 w-4 mr-2" />
@@ -268,6 +290,15 @@ export default function PolicyKnowledgeLibrary() {
 
           {/* Rule List */}
           <ScrollArea className="flex-1 p-6">
+            {error && (
+              <div className="text-center py-8 text-red-500 text-sm">
+                {error}{" "}
+                <button className="underline ml-1" onClick={loadRules}>
+                  Retry
+                </button>
+              </div>
+            )}
+
             <div
               className={cn(
                 viewMode === "grid" ? "grid grid-cols-2 gap-4" : "space-y-3",
@@ -283,7 +314,7 @@ export default function PolicyKnowledgeLibrary() {
                 />
               ))}
 
-              {sortedRules.length === 0 && (
+              {!loading && !error && sortedRules.length === 0 && (
                 <div className="text-center py-12">
                   <FileText className="h-12 w-12 text-gray-300 mx-auto mb-4" />
                   <h3 className="text-lg font-medium text-gray-900 mb-1">
@@ -308,31 +339,27 @@ export default function PolicyKnowledgeLibrary() {
           setEditingRule(rule);
           setEditRuleDialogOpen(true);
         }}
+        onDelete={handleDelete}
         filterOptions={filterOptions}
       />
 
-      {/* New Rule Dialog */}
-      <NewRuleDialog
+      {/* Create Dialog */}
+      <RuleFormDialog
         open={newRuleDialogOpen}
         onClose={() => setNewRuleDialogOpen(false)}
-        onSave={() => {
-          setNewRuleDialogOpen(false);
-        }}
+        onSave={handleCreate}
         filterOptions={filterOptions}
       />
 
-      {/* Edit Rule Dialog */}
-      <EditRuleDialog
+      {/* Edit Dialog */}
+      <RuleFormDialog
         open={editRuleDialogOpen}
         rule={editingRule}
         onClose={() => {
           setEditRuleDialogOpen(false);
           setEditingRule(null);
         }}
-        onSave={() => {
-          setEditRuleDialogOpen(false);
-          setEditingRule(null);
-        }}
+        onSave={handleEdit}
         filterOptions={filterOptions}
       />
     </div>

@@ -1,9 +1,13 @@
 """
 Client-facing Pydantic models.
+
+Defines the message/request/response data shapes used by the client router:
+ClientMessage (queued message), ClientMessageRequest (inbound API body), and
+ClientResponse (status + reply returned by the polling endpoint).
 """
 from __future__ import annotations
 
-from typing import List, Literal, Optional, Union
+from typing import List, Literal, Optional
 
 from pydantic import BaseModel, Field
 
@@ -18,6 +22,7 @@ class ClientMessage(BaseModel):
     message: str
     history: Optional[List[HistoryItem]] = None
     timestamp: int
+    component_id: Optional[str] = None  # set when routing to an external component
 
 
 class ClientMessageRequest(BaseModel):
@@ -25,6 +30,7 @@ class ClientMessageRequest(BaseModel):
     message: str = Field(..., min_length=1)
     history: Optional[List[HistoryItem]] = None
     auto_approve: Optional[bool] = False
+    component_id: Optional[str] = None  # set when routing to an external component
 
 
 class ClientResponse(BaseModel):

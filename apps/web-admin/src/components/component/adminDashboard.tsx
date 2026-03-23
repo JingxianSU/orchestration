@@ -42,6 +42,9 @@ type HITLRequest = {
   policyEvaluation?: PolicyEvaluation | null;
 };
 
+const ACTIVE_TAB_CLS =
+  "text-muted-foreground data-[state=active]:bg-background data-[state=active]:text-foreground data-[state=active]:font-bold data-[state=active]:shadow-sm";
+
 function StatChip({ label, value }: { label: string; value: string }) {
   return (
     <div className="flex items-center gap-2">
@@ -81,7 +84,7 @@ export function AdminDashboard({
   const [status, setStatus] = React.useState<"disconnected" | "connected">(
     "disconnected",
   );
-  const [httpLogs, setHttpLogs] = React.useState<any[]>([]);
+  const [httpLogs, setHttpLogs] = React.useState<unknown[]>([]);
   const [activeTab, setActiveTab] = React.useState<
     "live" | "provenance" | "register" | "logs" | "policy"
   >("live");
@@ -99,7 +102,7 @@ export function AdminDashboard({
     const { traceId, messageId, role } = externalSelectedInfo;
 
     const matchedTrace = traces.find((t) => {
-      const payload = t.payload as any;
+      const payload = t.payload as Record<string, unknown>;
 
       if (role === "user") {
         return (
@@ -167,6 +170,27 @@ export function AdminDashboard({
         if (parsed.type === "client_message") {
           const isAutoMode = parsed.data?.meta?.auto_mode === true;
 
+          // Always add to traces as the "Chat → Orch" first step
+          const traceItem: ChatTrace = {
+            id: `client-${parsed.message_id}-${parsed.ts}`,
+            createdAt: parsed.ts,
+            payload: {
+              type: "client_message",
+              trace_id: parsed.trace_id,
+              message_id: parsed.message_id,
+              message: parsed.data.message,
+              history: parsed.data.history,
+              meta: parsed.data.meta,
+              timestamp: parsed.ts,
+            },
+          };
+          setTraces((prev) => {
+            const exists = prev.some((t) => t.id === traceItem.id);
+            if (exists) return prev;
+            const next = [traceItem, ...prev];
+            return next.slice(0, 300);
+          });
+
           if (!isAutoMode) {
             const req: HITLRequest = {
               message_id: parsed.message_id,
@@ -177,7 +201,6 @@ export function AdminDashboard({
               timestamp: parsed.ts,
             };
             setHitlQueue((prev) => [...prev, req]);
-          } else {
           }
         }
 
@@ -202,10 +225,7 @@ export function AdminDashboard({
 
           setTraces((prev) => {
             const exists = prev.some((t) => t.id === item.id);
-            if (exists) {
-              console.warn("[SSE] Trace already exists:", item.id);
-              return prev;
-            }
+            if (exists) return prev;
             const next = [item, ...prev];
             return next.slice(0, 300);
           });
@@ -262,7 +282,29 @@ export function AdminDashboard({
           }
         }
 
-        if (parsed.type === "llm_response_ready") {
+        if (parsed.type === "policy_check_request") {
+          const checkTrace: ChatTrace = {
+            id: `policy-req-${parsed.data.message_id}-${parsed.data.policy_type}-${parsed.ts}`,
+            createdAt: parsed.ts,
+            payload: {
+              type: "policy_check_request",
+              trace_id: parsed.trace_id,
+              message_id: parsed.data.message_id,
+              policy_type: parsed.data.policy_type,
+              envelope_type: parsed.data.envelope_type,
+              action: parsed.data.action,
+              context: parsed.data.context,
+              payload: parsed.data.payload,
+              dry_run: parsed.data.dry_run,
+            },
+          };
+
+          setTraces((prev) => {
+            const exists = prev.some((t) => t.id === checkTrace.id);
+            if (exists) return prev;
+            const next = [checkTrace, ...prev];
+            return next.slice(0, 300);
+          });
         }
 
         if (parsed.type === "hitl_decision") {
@@ -287,19 +329,128 @@ export function AdminDashboard({
 
           setTraces((prev) => {
             const exists = prev.some((t) => t.id === decisionTrace.id);
-            if (exists) {
-              console.warn(
-                "[SSE] Decision trace already exists:",
-                decisionTrace.id,
-              );
-              return prev;
-            }
+            if (exists) return prev;
             const next = [decisionTrace, ...prev];
             return next.slice(0, 300);
           });
         }
-      } catch (e) {
-        console.error("[SSE] Parse error:", e, "Raw data:", evt.data);
+
+        if (parsed.type === "llm_response_ready") {
+          const llmTrace: ChatTrace = {
+            id: `llm-${parsed.data.message_id}-${parsed.ts}`,
+            createdAt: parsed.ts,
+            payload: {
+              type: "llm_response_ready",
+              trace_id: parsed.trace_id,
+              message_id: parsed.data.message_id,
+              original_message: parsed.data.original_message,
+              reply: parsed.data.reply,
+              claude_model: parsed.data.claude_model,
+              timings_ms: parsed.data.timings_ms,
+              timestamp: parsed.data.timestamp,
+            },
+          };
+
+          setTraces((prev) => {
+            const exists = prev.some((t) => t.id === llmTrace.id);
+            if (exists) return prev;
+            const next = [llmTrace, ...prev];
+            return next.slice(0, 300);
+          });
+        }
+
+        // Step 4a: Orch -> HITL (manual mode only)
+        if (parsed.type === "hitl_request") {
+          const trace: ChatTrace = {
+            id: `hitl-req-${parsed.data.message_id}-${parsed.ts}`,
+            createdAt: parsed.ts,
+            payload: {
+              type: "hitl_request",
+              trace_id: parsed.trace_id,
+              message_id: parsed.data.message_id,
+              message: parsed.data.message,
+              input_policy_decision: parsed.data.input_policy_decision,
+              input_policy_passed: parsed.data.input_policy_passed,
+              timestamp: parsed.data.timestamp,
+            },
+          };
+          setTraces((prev) => {
+            const exists = prev.some((t) => t.id === trace.id);
+            if (exists) return prev;
+            return [trace, ...prev].slice(0, 300);
+          });
+        }
+
+        // Step 4b: HITL -> Orch (admin input decision)
+        if (parsed.type === "hitl_admin_decision_input") {
+          const trace: ChatTrace = {
+            id: `hitl-dec-in-${parsed.data.message_id}-${parsed.ts}`,
+            createdAt: parsed.ts,
+            payload: {
+              type: "hitl_admin_decision_input",
+              trace_id: parsed.trace_id,
+              message_id: parsed.data.message_id,
+              decision: parsed.data.decision,
+              reviewer: parsed.data.reviewer,
+              reason: parsed.data.reason,
+              override_message: parsed.data.override_message,
+              admin_prompt: parsed.data.admin_prompt,
+              timestamp: parsed.data.timestamp,
+            },
+          };
+          setTraces((prev) => {
+            const exists = prev.some((t) => t.id === trace.id);
+            if (exists) return prev;
+            return [trace, ...prev].slice(0, 300);
+          });
+        }
+
+        // Step 8a: Orch -> HITL (secondary review request)
+        if (parsed.type === "secondary_review_request") {
+          const trace: ChatTrace = {
+            id: `sec-req-${parsed.data.message_id}-${parsed.ts}`,
+            createdAt: parsed.ts,
+            payload: {
+              type: "secondary_review_request",
+              trace_id: parsed.trace_id,
+              message_id: parsed.data.message_id,
+              llm_response: parsed.data.llm_response,
+              output_policy_evaluation: parsed.data.output_policy_evaluation,
+              timestamp: parsed.data.timestamp,
+            },
+          };
+          setTraces((prev) => {
+            const exists = prev.some((t) => t.id === trace.id);
+            if (exists) return prev;
+            return [trace, ...prev].slice(0, 300);
+          });
+        }
+
+        // Step 8b: HITL -> Orch (admin output decision)
+        if (parsed.type === "hitl_admin_decision_output") {
+          const trace: ChatTrace = {
+            id: `hitl-dec-out-${parsed.data.message_id}-${parsed.ts}`,
+            createdAt: parsed.ts,
+            payload: {
+              type: "hitl_admin_decision_output",
+              trace_id: parsed.trace_id,
+              message_id: parsed.data.message_id,
+              action: parsed.data.action,
+              reviewer: parsed.data.reviewer,
+              reject_reason: parsed.data.reject_reason,
+              edited_content: parsed.data.edited_content,
+              timestamp: parsed.data.timestamp,
+            },
+          };
+          setTraces((prev) => {
+            const exists = prev.some((t) => t.id === trace.id);
+            if (exists) return prev;
+            return [trace, ...prev].slice(0, 300);
+          });
+        }
+
+      } catch {
+        // ignore malformed SSE frames
       }
     });
 
@@ -316,32 +467,19 @@ export function AdminDashboard({
       setHitlQueue((prev) => prev.slice(1));
 
       try {
-        const storeResponse = await fetch(
-          `${API_BASE}/api/provenance/raw-message`,
-          {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              message_id: next.message_id,
-              trace_id: next.trace_id,
-              message: next.message,
-              history: next.history || [],
-              meta: next.meta || {},
-            }),
-          },
-        );
-
-        const result = await storeResponse.json();
-
-        if (storeResponse.ok) {
-        } else {
-          console.error(
-            "[ADMIN] Failed to store raw message to provenance:",
-            result,
-          );
-        }
-      } catch (e) {
-        console.error("[ADMIN] Error storing raw message:", e);
+        await fetch(`${API_BASE}/api/provenance/raw-message`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            message_id: next.message_id,
+            trace_id: next.trace_id,
+            message: next.message,
+            history: next.history || [],
+            meta: next.meta || {},
+          }),
+        });
+      } catch {
+        // non-critical: provenance store failure doesn't block HITL flow
       }
 
       setCurrentHitl(next);
@@ -373,10 +511,7 @@ export function AdminDashboard({
         }),
       });
 
-      if (!response.ok) {
-        console.error("Failed to send ALLOW decision");
-        return;
-      }
+      if (!response.ok) return;
 
       const result = await response.json();
 
@@ -392,10 +527,9 @@ export function AdminDashboard({
         setEditedContent(result.llm_response);
         setEditedAdminPrompt(adminPromptValue);
         setRegenerateError("");
-      } else {
       }
-    } catch (e) {
-      console.error("Failed to send ALLOW decision:", e);
+    } catch {
+      // ignore network errors for allow decision
     }
   };
 
@@ -425,7 +559,6 @@ export function AdminDashboard({
           .json()
           .catch(() => ({ detail: "Unknown error" }));
         const errorMsg = errorData.detail || `HTTP ${response.status}`;
-        console.error("Failed to regenerate response:", errorMsg);
         setRegenerateError(`Failed to regenerate: ${errorMsg}`);
         return;
       }
@@ -444,7 +577,6 @@ export function AdminDashboard({
       );
     } catch (e) {
       const errorMsg = e instanceof Error ? e.message : String(e);
-      console.error("Failed to regenerate:", errorMsg);
       setRegenerateError(`Network error: ${errorMsg}`);
     } finally {
       setIsRegenerating(false);
@@ -460,7 +592,7 @@ export function AdminDashboard({
     setRegenerateError("");
 
     try {
-      const response = await fetch(`/api/admin/secondary-review/${messageId}`, {
+      await fetch(`/api/admin/secondary-review/${messageId}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -471,13 +603,8 @@ export function AdminDashboard({
           reject_reason: reason,
         }),
       });
-
-      if (!response.ok) {
-        console.error("Failed to send REJECT decision");
-      } else {
-      }
-    } catch (e) {
-      console.error("Failed to send REJECT decision:", e);
+    } catch {
+      // ignore network errors for reject decision
     }
   };
 
@@ -494,7 +621,7 @@ export function AdminDashboard({
     setRegenerateError("");
 
     try {
-      const response = await fetch(`/api/admin/secondary-review/${messageId}`, {
+      await fetch(`/api/admin/secondary-review/${messageId}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -506,13 +633,8 @@ export function AdminDashboard({
           admin_prompt: editedAdminPrompt,
         }),
       });
-
-      if (!response.ok) {
-        console.error("Failed to send EDIT decision");
-      } else {
-      }
-    } catch (e) {
-      console.error("Failed to send EDIT decision:", e);
+    } catch {
+      // ignore network errors for edit decision
     }
   };
 
@@ -526,7 +648,7 @@ export function AdminDashboard({
     setRegenerateError("");
 
     try {
-      const response = await fetch(`/api/admin/secondary-review/${messageId}`, {
+      await fetch(`/api/admin/secondary-review/${messageId}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -538,13 +660,8 @@ export function AdminDashboard({
           admin_prompt: editedAdminPrompt,
         }),
       });
-
-      if (!response.ok) {
-        console.error("Failed to send APPROVE decision");
-      } else {
-      }
-    } catch (e) {
-      console.error("Failed to send APPROVE decision:", e);
+    } catch {
+      // ignore network errors for approve decision
     }
   };
 
@@ -557,7 +674,7 @@ export function AdminDashboard({
     const traceId = currentHitl.trace_id;
 
     try {
-      const response = await fetch(`/api/admin/decide/${messageId}`, {
+      await fetch(`/api/admin/decide/${messageId}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -568,13 +685,8 @@ export function AdminDashboard({
           reason: reason,
         }),
       });
-
-      if (!response.ok) {
-        console.error("Failed to send DENY decision");
-      } else {
-      }
-    } catch (e) {
-      console.error("Failed to send DENY decision:", e);
+    } catch {
+      // ignore network errors for deny decision
     }
   };
 
@@ -606,8 +718,8 @@ export function AdminDashboard({
         const data = await response.json();
         setHttpLogs(data.logs || []);
       }
-    } catch (e) {
-      console.error("Failed to fetch HTTP logs:", e);
+    } catch {
+      // ignore network errors for log polling
     }
   }, [API_BASE]);
 
@@ -662,37 +774,37 @@ export function AdminDashboard({
         {/* Main Tabs */}
         <Tabs
           value={activeTab}
-          onValueChange={(v) => setActiveTab(v as any)}
+          onValueChange={(v) => setActiveTab(v as typeof activeTab)}
           className="w-full"
         >
           <TabsList className="grid w-full grid-cols-5 bg-muted/40">
             <TabsTrigger
               value="live"
-              className="text-muted-foreground data-[state=active]:bg-primary data-[state=active]:text-primary-foreground data-[state=active]:shadow-sm"
+              className={ACTIVE_TAB_CLS}
             >
               Live
             </TabsTrigger>
             <TabsTrigger
               value="logs"
-              className="text-muted-foreground data-[state=active]:bg-primary data-[state=active]:text-primary-foreground data-[state=active]:shadow-sm"
+              className={ACTIVE_TAB_CLS}
             >
               Logs
             </TabsTrigger>
             <TabsTrigger
               value="policy"
-              className="text-muted-foreground data-[state=active]:bg-primary data-[state=active]:text-primary-foreground data-[state=active]:shadow-sm"
+              className={ACTIVE_TAB_CLS}
             >
               Policy
             </TabsTrigger>
             <TabsTrigger
               value="provenance"
-              className="text-muted-foreground data-[state=active]:bg-primary data-[state=active]:text-primary-foreground data-[state=active]:shadow-sm"
+              className={ACTIVE_TAB_CLS}
             >
               Provenance
             </TabsTrigger>
             <TabsTrigger
               value="register"
-              className="text-muted-foreground data-[state=active]:bg-primary data-[state=active]:text-primary-foreground data-[state=active]:shadow-sm"
+              className={ACTIVE_TAB_CLS}
             >
               Registry
             </TabsTrigger>

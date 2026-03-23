@@ -17,6 +17,9 @@ type SelectedMessageInfo = {
   role: "user" | "assistant";
 };
 
+// ---------------------------------------------------------------------------
+// Root layout
+// ---------------------------------------------------------------------------
 export default function AdminParent(): React.JSX.Element {
   const [selectedInfo, setSelectedInfo] =
     React.useState<SelectedMessageInfo | null>(null);
@@ -54,23 +57,25 @@ export default function AdminParent(): React.JSX.Element {
               </Button>
             </TooltipTrigger>
             <TooltipContent side="left">
-              {showClientChat ? "Hide Client Chat" : "Show Client Chat"}
+              {showClientChat ? "Hide Panel" : "Show Panel"}
             </TooltipContent>
           </Tooltip>
         </TooltipProvider>
       </div>
 
       <div
-        className={`flex-shrink-0 transition-all duration-300 ease-in-out overflow-hidden ${
+        className={`flex-shrink-0 flex flex-col transition-all duration-300 ease-in-out overflow-hidden ${
           showClientChat ? "w-[30%]" : "w-0"
         }`}
       >
-        <div className="w-full h-full min-w-[300px]">
-          <ClientChat
-            onMessageSelect={setSelectedInfo}
-            syncScroll={syncScroll}
-            autoMode={autoMode}
-          />
+        <div className="w-full h-full min-w-[300px] flex flex-col">
+          <div style={{ flex: 1, minHeight: 0, overflow: "hidden", display: "flex", flexDirection: "column" }}>
+            <ClientChat
+              onMessageSelect={setSelectedInfo}
+              syncScroll={syncScroll}
+              autoMode={autoMode}
+            />
+          </div>
         </div>
       </div>
     </div>

@@ -1,3 +1,5 @@
+// Policy Knowledge Library constants - icon map, colour helpers, default filter options,
+// mock rule data, and typed knowledge-base asset fixtures (RDR, KG, neural-network).
 import type { ElementType } from "react";
 import {
   FileText,
@@ -598,7 +600,7 @@ export type RdrNode = {
   condition?: {
     field: string;
     op: "eq" | "neq" | "in" | "not_in" | "contains" | "gte" | "lte";
-    value: any;
+    value: unknown;
   };
   conclusion?: {
     action: "allow" | "deny" | "require_approval" | "log" | "redact";

@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState } from "react";
-import { Globe } from "lucide-react";
+import { Globe, HelpCircle } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -24,6 +24,12 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 
 import type {
@@ -36,63 +42,156 @@ import type {
 import { getIconComponent } from "./constants";
 import SourceManager from "./SourceManager";
 
-// ============ Edit Rule Dialog ============
-interface EditRuleDialogProps {
-  open: boolean;
-  rule: Rule | null;
-  onClose: () => void;
-  onSave: (rule: Rule) => void;
-  filterOptions: FilterOptions;
+// ============ Shared Tab Trigger className ============
+const ACTIVE_TAB_CLS =
+  "data-[state=active]:bg-gray-100 data-[state=active]:text-foreground data-[state=active]:font-bold";
+
+// ============ TrustWorthy Tooltip ============
+function TrustWorthyTooltip() {
+  return (
+    <TooltipProvider delayDuration={200}>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <HelpCircle className="h-3.5 w-3.5 text-muted-foreground cursor-help" />
+        </TooltipTrigger>
+        <TooltipContent
+          side="right"
+          className="max-w-xs text-xs leading-relaxed bg-popover text-popover-foreground border shadow-md p-3"
+        >
+          <p className="font-semibold mb-1.5">Trust Worthy Types</p>
+          <div className="space-y-2">
+            <div>
+              <span className="font-medium text-blue-400">Explainable</span>
+              <p className="text-muted-foreground mt-0.5">
+                The system provides reasoning behind its output, tracing back to
+                the underlying logic or rules that led to the conclusion.
+              </p>
+            </div>
+            <div>
+              <span className="font-medium text-purple-400">Interpretable</span>
+              <p className="text-muted-foreground mt-0.5">
+                The mechanism is transparent enough to follow — whether through
+                a lookup, a formula, or a step-by-step process — even without
+                knowing the deeper rationale.
+              </p>
+            </div>
+            <div>
+              <span className="font-medium text-amber-400">Case</span>
+              <p className="text-muted-foreground mt-0.5">
+                Decisions are supported by real or representative examples that
+                demonstrate expected behavior in practice.
+              </p>
+            </div>
+          </div>
+        </TooltipContent>
+      </Tooltip>
+    </TooltipProvider>
+  );
 }
 
-const EditRuleDialog: React.FC<EditRuleDialogProps> = ({
+// ============ Default create state ============
+function createDefaultRule(): Partial<Rule> {
+  return {
+    id: `RS-${Math.floor(Math.random() * 1000)
+      .toString()
+      .padStart(3, "0")}`,
+    title: "",
+    summary: "",
+    domain: [],
+    jurisdiction: [],
+    intentType: "",
+    scope: "",
+    enforcement: "",
+    strength: "",
+    action: "",
+    source: [],
+    inferenceModel: "rdr",
+    owner: "",
+    version: "1.0.0",
+    status: "draft",
+    riskLevel: "medium",
+    trustWorthy: "other",
+    lastModified: new Date().toISOString(),
+    changeLog: [
+      {
+        date: new Date().toISOString().split("T")[0],
+        user: "current.user@company.com",
+        action: "Created",
+        details: "Initial knowledge base creation",
+      },
+    ],
+  };
+}
+
+// ============ Shared Props ============
+interface RuleFormDialogProps {
+  open: boolean;
+  onClose: () => void;
+  onSave: (rule: Partial<Rule>) => void;
+  filterOptions: FilterOptions;
+  /** Pass an existing rule to switch to edit mode; omit for create mode. */
+  rule?: Rule | null;
+}
+
+// ============ RuleFormDialog ============
+const RuleFormDialog: React.FC<RuleFormDialogProps> = ({
   open,
-  rule,
   onClose,
   onSave,
   filterOptions,
+  rule,
 }) => {
-  const [ruleData, setRuleData] = useState<Partial<Rule>>({});
+  const isEdit = Boolean(rule);
 
+  const [ruleData, setRuleData] = useState<Partial<Rule>>(
+    rule ? { ...rule } : createDefaultRule(),
+  );
+  const [activeTab, setActiveTab] = useState("basic");
+  const [errors, setErrors] = useState<Record<string, string>>({});
+
+  // Sync external rule prop into local state (edit mode only)
   React.useEffect(() => {
     if (rule) {
       setRuleData({ ...rule });
+    } else {
+      setRuleData(createDefaultRule());
     }
-  }, [rule]);
+    setErrors({});
+    setActiveTab("basic");
+  }, [rule, open]);
 
-  const [activeTab, setActiveTab] = useState("basic");
-
-  const [errors, setErrors] = useState<Record<string, string>>({});
-
-  const updateRule = (field: keyof Rule, value: any) => {
+  const updateRule = (field: keyof Rule, value: Rule[keyof Rule]) => {
     setRuleData((prev) => ({ ...prev, [field]: value }));
     if (errors[field]) {
       setErrors((prev) => {
-        const newErrors = { ...prev };
-        delete newErrors[field];
-        return newErrors;
+        const next = { ...prev };
+        delete next[field];
+        return next;
       });
     }
   };
 
-  const validateForm = () => {
+  const validateForm = (): boolean => {
     const newErrors: Record<string, string> = {};
-
     if (!ruleData.title) newErrors.title = "Title is required";
     if (!ruleData.summary) newErrors.summary = "Summary is required";
-    if (!ruleData.domain || ruleData.domain.length === 0)
+    if (!ruleData.domain?.length)
       newErrors.domain = "At least one domain is required";
     if (!ruleData.intentType) newErrors.intentType = "Intent type is required";
     if (!ruleData.scope) newErrors.scope = "Scope is required";
     if (!ruleData.strength) newErrors.strength = "Strength is required";
     if (!ruleData.action) newErrors.action = "Action is required";
-
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
   };
 
   const handleSave = () => {
-    if (validateForm()) {
+    if (!validateForm()) {
+      setActiveTab("basic");
+      return;
+    }
+
+    if (isEdit) {
       const updatedRule = {
         ...ruleData,
         lastModified: new Date().toISOString(),
@@ -107,21 +206,26 @@ const EditRuleDialog: React.FC<EditRuleDialogProps> = ({
         ],
       } as Rule;
       onSave(updatedRule);
-      onClose();
     } else {
-      setActiveTab("basic");
+      onSave(ruleData);
     }
+    onClose();
   };
 
-  if (!rule) return null;
+  // Edit mode: nothing to show if rule is not yet loaded
+  if (isEdit && !rule) return null;
 
   return (
     <Dialog open={open} onOpenChange={onClose}>
       <DialogContent className="max-w-4xl max-h-[90vh] flex flex-col p-0">
         <DialogHeader className="px-6 pt-6 pb-2 flex-shrink-0">
-          <DialogTitle>Edit Knowledge Base</DialogTitle>
+          <DialogTitle>
+            {isEdit ? "Edit Knowledge Base" : "Create New"}
+          </DialogTitle>
           <DialogDescription>
-            Modify the knowledge base metadata and settings.
+            {isEdit
+              ? "Modify the knowledge base metadata and settings."
+              : "Define a new knowledge base for your organization's policy library."}
           </DialogDescription>
         </DialogHeader>
 
@@ -131,32 +235,28 @@ const EditRuleDialog: React.FC<EditRuleDialogProps> = ({
           className="flex-1 flex flex-col min-h-0"
         >
           <TabsList className="px-6 py-2 border-b justify-start rounded-none bg-transparent h-auto flex-shrink-0">
-            <TabsTrigger
-              value="basic"
-              className="data-[state=active]:bg-gray-100"
-            >
+            <TabsTrigger value="basic" className={ACTIVE_TAB_CLS}>
               Basic Information
             </TabsTrigger>
-            <TabsTrigger
-              value="source"
-              className="data-[state=active]:bg-gray-100"
-            >
+            <TabsTrigger value="source" className={ACTIVE_TAB_CLS}>
               Source
             </TabsTrigger>
           </TabsList>
 
           <div className="flex-1 overflow-auto p-6">
             <ScrollArea className="h-full pr-4">
+              {/* ── Basic Information ── */}
               <TabsContent
                 value="basic"
                 className="m-0 data-[state=inactive]:hidden"
               >
                 <div className="space-y-4">
+                  {/* ID + Status */}
                   <div className="grid grid-cols-2 gap-4">
                     <div className="space-y-2">
-                      <Label htmlFor="edit-rule-id">ID</Label>
+                      <Label htmlFor="rule-id">ID</Label>
                       <Input
-                        id="edit-rule-id"
+                        id="rule-id"
                         value={ruleData.id || ""}
                         onChange={(e) => updateRule("id", e.target.value)}
                       />
@@ -165,7 +265,7 @@ const EditRuleDialog: React.FC<EditRuleDialogProps> = ({
                       )}
                     </div>
                     <div className="space-y-2">
-                      <Label htmlFor="edit-rule-status">Status</Label>
+                      <Label htmlFor="rule-status">Status</Label>
                       <Select
                         value={ruleData.status}
                         onValueChange={(value) => updateRule("status", value)}
@@ -194,10 +294,11 @@ const EditRuleDialog: React.FC<EditRuleDialogProps> = ({
                     </div>
                   </div>
 
+                  {/* Title */}
                   <div className="space-y-2">
-                    <Label htmlFor="edit-rule-title">Title</Label>
+                    <Label htmlFor="rule-title">Title</Label>
                     <Input
-                      id="edit-rule-title"
+                      id="rule-title"
                       value={ruleData.title || ""}
                       onChange={(e) => updateRule("title", e.target.value)}
                       className={errors.title ? "border-red-500" : ""}
@@ -207,10 +308,11 @@ const EditRuleDialog: React.FC<EditRuleDialogProps> = ({
                     )}
                   </div>
 
+                  {/* Summary */}
                   <div className="space-y-2">
-                    <Label htmlFor="edit-rule-summary">Summary</Label>
+                    <Label htmlFor="rule-summary">Summary</Label>
                     <textarea
-                      id="edit-rule-summary"
+                      id="rule-summary"
                       rows={3}
                       value={ruleData.summary || ""}
                       onChange={(e) => updateRule("summary", e.target.value)}
@@ -224,6 +326,7 @@ const EditRuleDialog: React.FC<EditRuleDialogProps> = ({
                     )}
                   </div>
 
+                  {/* Domain */}
                   <div className="space-y-2">
                     <Label>Domain</Label>
                     <div className="border rounded-md p-3">
@@ -240,19 +343,14 @@ const EditRuleDialog: React.FC<EditRuleDialogProps> = ({
                                   domain.value,
                                 )}
                                 onCheckedChange={(checked) => {
-                                  if (checked) {
-                                    updateRule("domain", [
-                                      ...(ruleData.domain || []),
-                                      domain.value,
-                                    ]);
-                                  } else {
-                                    updateRule(
-                                      "domain",
-                                      (ruleData.domain || []).filter(
-                                        (d) => d !== domain.value,
-                                      ),
-                                    );
-                                  }
+                                  updateRule(
+                                    "domain",
+                                    checked
+                                      ? [...(ruleData.domain || []), domain.value]
+                                      : (ruleData.domain || []).filter(
+                                          (d) => d !== domain.value,
+                                        ),
+                                  );
                                 }}
                               />
                               <DomainIcon className="h-4 w-4 text-gray-500" />
@@ -269,6 +367,7 @@ const EditRuleDialog: React.FC<EditRuleDialogProps> = ({
                     </div>
                   </div>
 
+                  {/* Jurisdiction */}
                   <div className="space-y-2">
                     <Label>Jurisdiction</Label>
                     <div className="border rounded-md p-3">
@@ -283,34 +382,31 @@ const EditRuleDialog: React.FC<EditRuleDialogProps> = ({
                                 jurisdiction.value,
                               )}
                               onCheckedChange={(checked) => {
-                                if (checked) {
-                                  updateRule("jurisdiction", [
-                                    ...(ruleData.jurisdiction || []),
-                                    jurisdiction.value,
-                                  ]);
-                                } else {
-                                  updateRule(
-                                    "jurisdiction",
-                                    (ruleData.jurisdiction || []).filter(
-                                      (j) => j !== jurisdiction.value,
-                                    ),
-                                  );
-                                }
+                                updateRule(
+                                  "jurisdiction",
+                                  checked
+                                    ? [
+                                        ...(ruleData.jurisdiction || []),
+                                        jurisdiction.value,
+                                      ]
+                                    : (ruleData.jurisdiction || []).filter(
+                                        (j) => j !== jurisdiction.value,
+                                      ),
+                                );
                               }}
                             />
                             <Globe className="h-4 w-4 text-gray-500" />
-                            <span className="text-sm">
-                              {jurisdiction.label}
-                            </span>
+                            <span className="text-sm">{jurisdiction.label}</span>
                           </label>
                         ))}
                       </div>
                     </div>
                   </div>
 
+                  {/* Intent Type + Scope */}
                   <div className="grid grid-cols-2 gap-4">
                     <div className="space-y-2">
-                      <Label htmlFor="edit-rule-intent">Intent Type</Label>
+                      <Label htmlFor="rule-intent">Intent Type</Label>
                       <Select
                         value={ruleData.intentType || ""}
                         onValueChange={(value) =>
@@ -326,10 +422,7 @@ const EditRuleDialog: React.FC<EditRuleDialogProps> = ({
                           {filterOptions.intentTypes.map((intent) => {
                             const IntentIcon = getIconComponent(intent.icon);
                             return (
-                              <SelectItem
-                                key={intent.value}
-                                value={intent.value}
-                              >
+                              <SelectItem key={intent.value} value={intent.value}>
                                 <div className="flex items-center gap-2">
                                   <IntentIcon className="h-4 w-4" />
                                   {intent.label}
@@ -347,7 +440,7 @@ const EditRuleDialog: React.FC<EditRuleDialogProps> = ({
                     </div>
 
                     <div className="space-y-2">
-                      <Label htmlFor="edit-rule-scope">Scope</Label>
+                      <Label htmlFor="rule-scope">Scope</Label>
                       <Select
                         value={ruleData.scope || ""}
                         onValueChange={(value) => updateRule("scope", value)}
@@ -371,9 +464,10 @@ const EditRuleDialog: React.FC<EditRuleDialogProps> = ({
                     </div>
                   </div>
 
+                  {/* Strength + Enforcement */}
                   <div className="grid grid-cols-2 gap-4">
                     <div className="space-y-2">
-                      <Label htmlFor="edit-rule-strength">Strength</Label>
+                      <Label htmlFor="rule-strength">Strength</Label>
                       <Select
                         value={ruleData.strength || ""}
                         onValueChange={(value) => updateRule("strength", value)}
@@ -405,14 +499,12 @@ const EditRuleDialog: React.FC<EditRuleDialogProps> = ({
                         </SelectContent>
                       </Select>
                       {errors.strength && (
-                        <p className="text-xs text-red-500">
-                          {errors.strength}
-                        </p>
+                        <p className="text-xs text-red-500">{errors.strength}</p>
                       )}
                     </div>
 
                     <div className="space-y-2">
-                      <Label htmlFor="edit-rule-enforcement">Enforcement</Label>
+                      <Label htmlFor="rule-enforcement">Enforcement</Label>
                       <Select
                         value={ruleData.enforcement || ""}
                         onValueChange={(value) =>
@@ -443,9 +535,10 @@ const EditRuleDialog: React.FC<EditRuleDialogProps> = ({
                     </div>
                   </div>
 
+                  {/* Risk Level + Inference Model */}
                   <div className="grid grid-cols-2 gap-4">
                     <div className="space-y-2">
-                      <Label htmlFor="edit-rule-risk">Risk Level</Label>
+                      <Label htmlFor="rule-risk">Risk Level</Label>
                       <Select
                         value={ruleData.riskLevel || "medium"}
                         onValueChange={(value) =>
@@ -456,36 +549,27 @@ const EditRuleDialog: React.FC<EditRuleDialogProps> = ({
                           <SelectValue placeholder="Select risk level" />
                         </SelectTrigger>
                         <SelectContent>
-                          <SelectItem value="critical">
-                            <div className="flex items-center gap-2">
-                              <div className="w-3 h-3 rounded bg-red-600" />
-                              Critical
-                            </div>
-                          </SelectItem>
-                          <SelectItem value="high">
-                            <div className="flex items-center gap-2">
-                              <div className="w-3 h-3 rounded bg-orange-500" />
-                              High
-                            </div>
-                          </SelectItem>
-                          <SelectItem value="medium">
-                            <div className="flex items-center gap-2">
-                              <div className="w-3 h-3 rounded bg-amber-500" />
-                              Medium
-                            </div>
-                          </SelectItem>
-                          <SelectItem value="low">
-                            <div className="flex items-center gap-2">
-                              <div className="w-3 h-3 rounded bg-green-500" />
-                              Low
-                            </div>
-                          </SelectItem>
+                          {(
+                            [
+                              { value: "critical", color: "bg-red-600", label: "Critical" },
+                              { value: "high", color: "bg-orange-500", label: "High" },
+                              { value: "medium", color: "bg-amber-500", label: "Medium" },
+                              { value: "low", color: "bg-green-500", label: "Low" },
+                            ] as const
+                          ).map(({ value, color, label }) => (
+                            <SelectItem key={value} value={value}>
+                              <div className="flex items-center gap-2">
+                                <div className={cn("w-3 h-3 rounded", color)} />
+                                {label}
+                              </div>
+                            </SelectItem>
+                          ))}
                         </SelectContent>
                       </Select>
                     </div>
 
                     <div className="space-y-2">
-                      <Label htmlFor="edit-rule-inference-model">
+                      <Label htmlFor="rule-inference-model">
                         Inference Model
                       </Label>
                       <Select
@@ -514,17 +598,22 @@ const EditRuleDialog: React.FC<EditRuleDialogProps> = ({
                     </div>
                   </div>
 
+                  {/* Owner */}
                   <div className="space-y-2">
-                    <Label htmlFor="edit-rule-owner">Owner</Label>
+                    <Label htmlFor="rule-owner">Owner</Label>
                     <Input
-                      id="edit-rule-owner"
+                      id="rule-owner"
                       value={ruleData.owner || ""}
                       onChange={(e) => updateRule("owner", e.target.value)}
                     />
                   </div>
 
+                  {/* Trust Worthy */}
                   <div className="space-y-2">
-                    <Label htmlFor="edit-rule-trustworthy">Trust Worthy</Label>
+                    <div className="flex items-center gap-1.5">
+                      <Label htmlFor="rule-trustworthy">Trust Worthy</Label>
+                      <TrustWorthyTooltip />
+                    </div>
                     <Select
                       value={ruleData.trustWorthy || "other"}
                       onValueChange={(value) =>
@@ -553,6 +642,7 @@ const EditRuleDialog: React.FC<EditRuleDialogProps> = ({
                 </div>
               </TabsContent>
 
+              {/* ── Source ── */}
               <TabsContent
                 value="source"
                 className="m-0 data-[state=inactive]:hidden"
@@ -569,7 +659,9 @@ const EditRuleDialog: React.FC<EditRuleDialogProps> = ({
             <Button variant="outline" onClick={onClose}>
               Cancel
             </Button>
-            <Button onClick={handleSave}>Save Changes</Button>
+            <Button onClick={handleSave}>
+              {isEdit ? "Save Changes" : "Create Knowledge Base"}
+            </Button>
           </DialogFooter>
         </Tabs>
       </DialogContent>
@@ -577,4 +669,4 @@ const EditRuleDialog: React.FC<EditRuleDialogProps> = ({
   );
 };
 
-export default EditRuleDialog;
+export default RuleFormDialog;

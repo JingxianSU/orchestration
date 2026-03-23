@@ -39,5 +39,10 @@ class Settings:
     # Orchestration
     ORCH_LEDGER_ANCHOR: str = os.getenv("ORCH_LEDGER_ANCHOR", "")
 
+    # OpenClaw Gateway
+    OPENCLAW_GATEWAY_URL: str = os.getenv("OPENCLAW_GATEWAY_URL", "")
+    OPENCLAW_GATEWAY_TOKEN: str = os.getenv("OPENCLAW_GATEWAY_TOKEN", "")
+    OPENCLAW_GATEWAY_SCOPES: str = os.getenv("OPENCLAW_GATEWAY_SCOPES", "operator.read")
+
 
 settings = Settings()

@@ -10,12 +10,19 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Loader2, Send, Clock, Quote } from "lucide-react";
+import { Loader2, Send, Clock, Quote, ExternalLink } from "lucide-react";
 import {
   HoverCard,
   HoverCardContent,
   HoverCardTrigger,
 } from "@/components/ui/hover-card";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 
 type Role = "user" | "assistant";
 type PolicyViolationRef = {
@@ -77,6 +84,15 @@ type ClientResponse = {
   reason?: string;
   error_code?: number;
   citation?: Citation;
+};
+
+type ExternalComponent = {
+  id: string;
+  name: string;
+  description?: string;
+  connection_type: "http" | "ws" | "openclaw";
+  endpoint: string;
+  status: string;
 };
 
 function uid(): string {
@@ -308,6 +324,29 @@ export function ClientChat({
   const [error, setError] = React.useState<string | null>(null);
   const effectiveMode = autoMode ? "Auto" : "Manual";
 
+  // External component routing
+  const [externalComponents, setExternalComponents] = React.useState<
+    ExternalComponent[]
+  >([]);
+  const [selectedTarget, setSelectedTarget] =
+    React.useState<string>("internal");
+
+  // Fetch external components on mount, then poll every 5 seconds so newly
+  // registered components appear in the dropdown without requiring a page reload.
+  React.useEffect(() => {
+    const fetchComponents = () => {
+      fetch("http://localhost:8000/api/external/components")
+        .then((r) => r.json())
+        .then((data: ExternalComponent[]) => setExternalComponents(data))
+        .catch(() => {
+          /* ignore */
+        });
+    };
+    fetchComponents();
+    const interval = window.setInterval(fetchComponents, 5000);
+    return () => window.clearInterval(interval);
+  }, []);
+
   const bottomRef = React.useRef<HTMLDivElement | null>(null);
   const abortRef = React.useRef<AbortController | null>(null);
   const pollIntervalRef = React.useRef<Map<string, number>>(new Map());
@@ -436,8 +475,6 @@ export function ClientChat({
 
       const response = (await res.json()) as ClientMessageResponse;
 
-      console.log(`[CLIENT] Message sent: ${response.message_id}`);
-
       setMessages((prev) =>
         prev.map((m) =>
           m.id === userMsgId
@@ -459,7 +496,6 @@ export function ClientChat({
         pollCount++;
 
         if (pollCount > maxPolls) {
-          console.log(`[CLIENT] Max polls reached for ${response.message_id}`);
           clearInterval(pollInterval);
           pollIntervalRef.current.delete(response.message_id);
 
@@ -486,8 +522,6 @@ export function ClientChat({
           resp &&
           (resp.status === "completed" || resp.status === "rejected")
         ) {
-          console.log(`[CLIENT] Response data:`, resp);
-          console.log(`[CLIENT] Citation:`, resp.citation);
           clearInterval(pollInterval);
           pollIntervalRef.current.delete(response.message_id);
 
@@ -552,9 +586,171 @@ export function ClientChat({
     }
   }, [input, loading, messages, checkResponse, autoMode]);
 
+  // External components now go through the same HITL queue as internal Claude.
+  // The only difference is we pass component_id so the backend knows to forward
+  // the approved message to the external component instead of Claude.
+  const sendMessageExternal = React.useCallback(
+    async (componentId: string) => {
+      const text = input.trim();
+      if (!text || loading) return;
+
+      setError(null);
+      setInput("");
+
+      const userMsgId = uid();
+      const userMsg: ChatMessage = {
+        id: userMsgId,
+        role: "user",
+        content: text,
+        createdAt: Date.now(),
+        status: "pending",
+        clickable: true,
+      };
+
+      setMessages((prev) => [...prev, userMsg]);
+      setLoading(true);
+
+      abortRef.current?.abort();
+      const controller = new AbortController();
+      abortRef.current = controller;
+
+      try {
+        const res = await fetch("/api/client/message", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            message: text,
+            history: messages.map((m) => ({
+              role: m.role,
+              content: m.content,
+            })),
+            auto_approve: false,
+            component_id: componentId,
+          }),
+          signal: controller.signal,
+        });
+
+        if (!res.ok) {
+          const errText = await res.text().catch(() => "");
+          throw new Error(errText || `Request failed: ${res.status}`);
+        }
+
+        const response = (await res.json()) as ClientMessageResponse;
+
+        setMessages((prev) =>
+          prev.map((m) =>
+            m.id === userMsgId
+              ? {
+                  ...m,
+                  messageId: response.message_id,
+                  traceId: response.trace_id,
+                  clickable: true,
+                }
+              : m,
+          ),
+        );
+
+        let pollCount = 0;
+        const pollInterval = window.setInterval(async () => {
+          pollCount++;
+          if (pollCount > 120) {
+            clearInterval(pollInterval);
+            pollIntervalRef.current.delete(response.message_id);
+            setMessages((prev) =>
+              prev.map((m) =>
+                m.id === userMsgId ? { ...m, status: "rejected" } : m,
+              ),
+            );
+            setMessages((prev) => [
+              ...prev,
+              {
+                id: uid(),
+                role: "assistant",
+                content: "⏱️ Request timed out.",
+                createdAt: Date.now(),
+              },
+            ]);
+            setLoading(false);
+            return;
+          }
+
+          const resp = await checkResponse(response.message_id);
+          if (
+            resp &&
+            (resp.status === "completed" || resp.status === "rejected")
+          ) {
+            clearInterval(pollInterval);
+            pollIntervalRef.current.delete(response.message_id);
+
+            setMessages((prev) =>
+              prev.map((m) =>
+                m.id === userMsgId
+                  ? { ...m, status: resp.status, citation: resp.citation }
+                  : m,
+              ),
+            );
+
+            if (resp.status === "completed" && resp.reply) {
+              setMessages((prev) => [
+                ...prev,
+                {
+                  id: uid(),
+                  role: "assistant",
+                  content: resp.reply!,
+                  createdAt: Date.now(),
+                  status: "completed",
+                  messageId: response.message_id,
+                  traceId: response.trace_id,
+                  clickable: true,
+                  citation: resp.citation,
+                },
+              ]);
+            } else if (resp.status === "rejected") {
+              const errorCodeText = resp.error_code
+                ? `[Error ${resp.error_code}]`
+                : "";
+              setMessages((prev) => [
+                ...prev,
+                {
+                  id: uid(),
+                  role: "assistant",
+                  content: `❌ Request denied ${errorCodeText}\n\nReason: ${resp.reason || "No reason provided"}`,
+                  createdAt: Date.now(),
+                  status: "rejected",
+                  messageId: response.message_id,
+                  traceId: response.trace_id,
+                  clickable: false,
+                  citation: resp.citation,
+                },
+              ]);
+            }
+
+            setLoading(false);
+          }
+        }, 1000);
+
+        pollIntervalRef.current.set(response.message_id, pollInterval);
+      } catch (e: unknown) {
+        if (e instanceof DOMException && e.name === "AbortError") return;
+        setError(e instanceof Error ? e.message : "Unknown error");
+        setLoading(false);
+        setMessages((prev) =>
+          prev.map((m) =>
+            m.id === userMsgId ? { ...m, status: "rejected" } : m,
+          ),
+        );
+      }
+    },
+    [input, loading, messages, checkResponse],
+  );
+
   const sendMessage = React.useCallback(() => {
-    void sendMessageManual();
-  }, [sendMessageManual]);
+    if (selectedTarget !== "internal") {
+      void sendMessageExternal(selectedTarget);
+    } else {
+      void sendMessageManual();
+    }
+  }, [selectedTarget, sendMessageManual, sendMessageExternal]);
 
   const onKeyDown = React.useCallback(
     (e: React.KeyboardEvent<HTMLInputElement>) => {
@@ -577,19 +773,43 @@ export function ClientChat({
     <>
       <div className="h-screen p-2 flex items-center justify-center bg-background">
         <Card className="w-full max-w-full">
-          <CardHeader className="gap-1">
+          <CardHeader className="gap-2">
             <CardTitle>Chatbot Simulation</CardTitle>
-            <div className="flex items-center justify-between">
+            <div className="flex items-center justify-between gap-2 flex-wrap">
               {loading && (
                 <div className="text-sm text-muted-foreground">
-                  Waiting for admin approval...
+                  {selectedTarget === "internal"
+                    ? "Waiting for admin approval..."
+                    : "Forwarding to external component..."}
                 </div>
               )}
-              <Badge
-                variant={effectiveMode === "Auto" ? "default" : "secondary"}
-              >
-                {effectiveMode} Mode
-              </Badge>
+              <div className="flex items-center gap-2 ml-auto">
+                <Badge
+                  variant={effectiveMode === "Auto" ? "default" : "secondary"}
+                >
+                  {effectiveMode} Mode
+                </Badge>
+                {/* Target selector */}
+                <Select
+                  value={selectedTarget}
+                  onValueChange={setSelectedTarget}
+                >
+                  <SelectTrigger className="h-7 text-xs w-44">
+                    <SelectValue placeholder="Route to…" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="internal">Internal (Claude)</SelectItem>
+                    {externalComponents.map((c) => (
+                      <SelectItem key={c.id} value={c.id}>
+                        <div className="flex items-center gap-1.5">
+                          <ExternalLink className="h-3 w-3" />
+                          {c.name}
+                        </div>
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
             </div>
           </CardHeader>
 

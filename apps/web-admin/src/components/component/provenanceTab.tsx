@@ -19,15 +19,18 @@ type ProvEvent = {
   actor?: string | null;
   module_id?: string | null;
   envelope_type?: string | null;
-  input_ref?: any;
-  output_ref?: any;
-  policy_ref?: any;
-  meta?: any;
+  input_ref?: unknown;
+  output_ref?: unknown;
+  policy_ref?: unknown;
+  meta?: unknown;
   status?: "SUCCESS" | "ERROR" | string;
   prev_event_hash?: string | null;
   event_hash?: string | null;
   ledger_anchor?: string | null;
 };
+
+const ACTIVE_TAB_CLS =
+  "text-muted-foreground data-[state=active]:bg-background data-[state=active]:text-foreground data-[state=active]:font-bold data-[state=active]:shadow-sm";
 
 function safeStringify(value: unknown): string {
   try {
@@ -123,8 +126,8 @@ export function ProvenanceTab({
       if (!selectedProvId && items.length) {
         setSelectedProvId(items[0].event_id);
       }
-    } catch (e: any) {
-      setProvListError(e?.message ?? String(e));
+    } catch (e: unknown) {
+      setProvListError(e instanceof Error ? e.message : String(e));
       setProvList([]);
     } finally {
       setProvListLoading(false);
@@ -144,8 +147,8 @@ export function ProvenanceTab({
         }
         const data = await res.json();
         setProvDetail(data);
-      } catch (e: any) {
-        setProvDetailError(e?.message ?? String(e));
+      } catch (e: unknown) {
+        setProvDetailError(e instanceof Error ? e.message : String(e));
         setProvDetail(null);
       } finally {
         setProvDetailLoading(false);
@@ -328,7 +331,7 @@ export function ProvenanceTab({
                       <TabsTrigger
                         key={v}
                         value={v}
-                        className="text-muted-foreground data-[state=active]:bg-primary data-[state=active]:text-primary-foreground data-[state=active]:shadow-sm"
+                        className={ACTIVE_TAB_CLS}
                       >
                         {v[0].toUpperCase() + v.slice(1)}
                       </TabsTrigger>
