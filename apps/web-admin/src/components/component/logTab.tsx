@@ -72,13 +72,38 @@ type CommLog = {
   timestamp: number;
   datetime: string;
   source: string;
-  channel: "ws" | "event" | "req" | "res" | "transcript" | "workspace" | "discovery";
-  kind: "connect" | "disconnect" | "event" | "request" | "response" | "entry" | "file" | "service";
+  channel:
+    | "ws"
+    | "event"
+    | "req"
+    | "res"
+    | "transcript"
+    | "workspace"
+    | "discovery";
+  kind:
+    | "connect"
+    | "disconnect"
+    | "event"
+    | "request"
+    | "response"
+    | "entry"
+    | "file"
+    | "service";
   event?: string | null;
   method?: string | null;
   ok?: boolean | null;
   payload?: Record<string, unknown>;
   error?: string | null;
+};
+
+type SkillTranscriptLog = {
+  log: CommLog;
+  skillName: string;
+  skillPath: string;
+  toolName: string;
+  agentId: string;
+  sessionId: string;
+  description?: string | null;
 };
 
 interface LogTabProps {
@@ -138,6 +163,136 @@ function truncateUrl(url: string, maxLength: number = 60): string {
     return path.substring(0, maxLength - 3) + "...";
   }
   return path;
+}
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  return value as Record<string, unknown>;
+}
+
+function getTranscriptMessage(
+  payload: Record<string, unknown>,
+): Record<string, unknown> {
+  return asRecord(payload.message) ?? payload;
+}
+
+function getTranscriptContentItems(
+  payload: Record<string, unknown>,
+): Record<string, unknown>[] {
+  const message = getTranscriptMessage(payload);
+  const content = message.content ?? payload.content;
+  if (!Array.isArray(content)) return [];
+  return content
+    .map((item) => asRecord(item))
+    .filter((item): item is Record<string, unknown> => item !== null);
+}
+
+function getTranscriptType(payload: Record<string, unknown>): string {
+  return (typeof payload.type === "string" && payload.type) || "unknown";
+}
+
+function getTranscriptRole(payload: Record<string, unknown>): string | null {
+  const message = getTranscriptMessage(payload);
+  return (
+    (typeof message.role === "string" && message.role) ||
+    (typeof payload.role === "string" && payload.role) ||
+    null
+  );
+}
+
+function getTranscriptContentTypes(payload: Record<string, unknown>): string[] {
+  return Array.from(
+    new Set(
+      getTranscriptContentItems(payload)
+        .map((item) => (typeof item.type === "string" ? item.type : null))
+        .filter((type): type is string => type !== null),
+    ),
+  );
+}
+
+function getTranscriptTextItems(payload: Record<string, unknown>): string[] {
+  return getTranscriptContentItems(payload)
+    .map((item) => (typeof item.text === "string" ? item.text : null))
+    .filter((text): text is string => text !== null);
+}
+
+function extractSkillDescription(text: string): string | null {
+  const frontmatterMatch = text.match(/^---\s*\n([\s\S]*?)\n---(?:\s*\n|$)/);
+  const source = frontmatterMatch?.[1] ?? text;
+  const descriptionLine = source
+    .split("\n")
+    .find((line) => line.trimStart().startsWith("description:"));
+  if (!descriptionLine) return null;
+
+  let description = descriptionLine.replace(/^\s*description:\s*/, "").trim();
+  if (
+    (description.startsWith('"') && description.endsWith('"')) ||
+    (description.startsWith("'") && description.endsWith("'"))
+  ) {
+    description = description.slice(1, -1);
+  }
+  return description || null;
+}
+
+function isToolTranscriptLog(log: CommLog): boolean {
+  const payload = asRecord(log.payload);
+  if (!payload) return false;
+  const role = getTranscriptRole(payload);
+  const contentTypes = getTranscriptContentTypes(payload);
+  return (
+    role === "tool" ||
+    role === "toolResult" ||
+    contentTypes.includes("toolCall") ||
+    contentTypes.includes("toolResult")
+  );
+}
+
+function extractSkillTranscriptLog(
+  log: CommLog,
+  descriptionByToolCallId?: Map<string, string>,
+): SkillTranscriptLog | null {
+  const payload = asRecord(log.payload);
+  if (!payload || payload.type !== "message") return null;
+
+  const message = getTranscriptMessage(payload);
+  const role = getTranscriptRole(payload) ?? "";
+  const stopReason =
+    (typeof payload.stopReason === "string" && payload.stopReason) ||
+    (typeof message.stopReason === "string" && message.stopReason) ||
+    "";
+  if (role !== "assistant" || stopReason !== "toolUse") return null;
+
+  for (const item of getTranscriptContentItems(payload)) {
+    if (item.type !== "toolCall") continue;
+    const args = asRecord(item.arguments);
+    const path = typeof args?.path === "string" ? args.path : null;
+    if (!path || !path.includes("SKILL.md")) continue;
+
+    const parts = path.replace(/\\/g, "/").split("/").filter(Boolean);
+    const fileIndex = parts.lastIndexOf("SKILL.md");
+    if (fileIndex <= 0) continue;
+
+    return {
+      log,
+      skillName: parts[fileIndex - 1],
+      skillPath: path,
+      toolName: typeof item.name === "string" ? item.name : "toolCall",
+      agentId:
+        (typeof payload._agent_id === "string" && payload._agent_id) ||
+        log.source.split(":").pop() ||
+        "",
+      sessionId:
+        (typeof payload._session_id === "string" && payload._session_id) ||
+        log.event ||
+        "",
+      description:
+        (typeof item.id === "string" &&
+          descriptionByToolCallId?.get(item.id)) ||
+        null,
+    };
+  }
+
+  return null;
 }
 
 function JsonViewer({ data, title }: { data: unknown; title: string }) {
@@ -419,21 +574,24 @@ function TranscriptEntryCard({
   isExpanded: boolean;
 }) {
   const p = log.payload ?? {};
-  const role = (p.role as string | undefined) ?? (p.type as string | undefined) ?? "unknown";
+  const transcriptType = getTranscriptType(p);
+  const role = getTranscriptRole(p);
+  const contentTypes = getTranscriptContentTypes(p);
   const content =
     typeof p.content === "string"
       ? p.content
       : typeof p.text === "string"
         ? p.text
         : JSON.stringify(p.content ?? p.text ?? p);
-  const agentId = (p._agent_id as string | undefined) ?? log.source.split(":").pop() ?? "";
+  const agentId =
+    (p._agent_id as string | undefined) ?? log.source.split(":").pop() ?? "";
   const sessionId = (p._session_id as string | undefined) ?? log.event ?? "";
   const roleColor =
     role === "user"
       ? "text-blue-400"
       : role === "assistant"
         ? "text-green-400"
-        : role === "tool"
+        : role === "tool" || role === "toolResult"
           ? "text-yellow-400"
           : "text-gray-400";
 
@@ -445,14 +603,74 @@ function TranscriptEntryCard({
     >
       <div className="flex items-center gap-2 mb-1">
         <Bot className="h-3.5 w-3.5 text-muted-foreground" />
-        <span className="text-xs text-muted-foreground font-mono truncate max-w-[140px]">{agentId}</span>
-        <Badge variant="outline" className={`text-[10px] px-1.5 py-0 font-mono ${roleColor}`}>
-          {role}
+        <span className="text-xs text-muted-foreground font-mono truncate max-w-[140px]">
+          {agentId}
+        </span>
+        <Badge variant="outline" className="text-[10px] px-1.5 py-0 font-mono">
+          {transcriptType}
         </Badge>
-        <span className="text-xs text-muted-foreground ml-auto">{formatTime(log.timestamp)}</span>
+        {role && (
+          <Badge
+            variant="outline"
+            className={`text-[10px] px-1.5 py-0 font-mono ${roleColor}`}
+          >
+            {role}
+          </Badge>
+        )}
+        {contentTypes.map((contentType) => (
+          <Badge
+            key={contentType}
+            variant="outline"
+            className="text-[10px] px-1.5 py-0 font-mono text-muted-foreground"
+          >
+            {contentType}
+          </Badge>
+        ))}
+        <span className="text-xs text-muted-foreground ml-auto">
+          {formatTime(log.timestamp)}
+        </span>
       </div>
-      <div className="text-sm text-foreground truncate">{content.slice(0, 120)}</div>
-      <div className="mt-0.5 text-xs text-muted-foreground truncate font-mono">session: {sessionId}</div>
+      <div className="text-sm text-foreground truncate">
+        {content.slice(0, 120)}
+      </div>
+      <div className="mt-0.5 text-xs text-muted-foreground truncate font-mono">
+        session: {sessionId}
+      </div>
+    </div>
+  );
+}
+
+function SkillEntryCard({
+  entry,
+  isExpanded,
+}: {
+  entry: SkillTranscriptLog;
+  isExpanded: boolean;
+}) {
+  return (
+    <div
+      className={`w-full p-3 border rounded-lg text-left transition-all hover:bg-muted/50 ${
+        isExpanded ? "border-primary bg-muted/30" : "border-border"
+      }`}
+    >
+      <div className="flex items-center gap-2 mb-1">
+        <FileText className="h-4 w-4 text-violet-400" />
+        <span className="text-sm font-mono text-foreground">
+          {entry.skillName}
+        </span>
+        <Badge variant="outline" className="text-[10px] px-1.5 py-0 font-mono">
+          {entry.toolName}
+        </Badge>
+        <span className="text-xs text-muted-foreground ml-auto">
+          {formatTime(entry.log.timestamp)}
+        </span>
+      </div>
+      <div className="text-xs text-muted-foreground truncate font-mono">
+        {entry.skillPath}
+      </div>
+      <div className="mt-0.5 text-xs text-muted-foreground truncate">
+        agent: {entry.agentId} | session: {entry.sessionId}
+      </div>
     </div>
   );
 }
@@ -479,11 +697,16 @@ function WorkspaceFileCard({
       <div className="flex items-center gap-2 mb-1">
         <FileText className="h-4 w-4 text-blue-400" />
         <span className="text-sm font-mono text-foreground">{name}</span>
-        <Badge variant="outline" className="text-[10px] px-1.5 py-0 text-muted-foreground ml-auto">
+        <Badge
+          variant="outline"
+          className="text-[10px] px-1.5 py-0 text-muted-foreground ml-auto"
+        >
           {size > 1024 ? `${(size / 1024).toFixed(1)}KB` : `${size}B`}
         </Badge>
       </div>
-      <div className="text-xs text-muted-foreground truncate">{content.slice(0, 80)}</div>
+      <div className="text-xs text-muted-foreground truncate">
+        {content.slice(0, 80)}
+      </div>
     </div>
   );
 }
@@ -510,15 +733,23 @@ function DiscoveryServiceCard({
     >
       <div className="flex items-center gap-2 mb-1">
         <Radio className="h-4 w-4 text-green-400" />
-        <span className="text-sm font-mono text-foreground truncate">{name}</span>
-        <Badge variant="outline" className="text-xs font-mono text-green-400 border-green-500/30 ml-auto">
+        <span className="text-sm font-mono text-foreground truncate">
+          {name}
+        </span>
+        <Badge
+          variant="outline"
+          className="text-xs font-mono text-green-400 border-green-500/30 ml-auto"
+        >
           {host}:{port}
         </Badge>
       </div>
       {Object.keys(txt).length > 0 && (
         <div className="flex flex-wrap gap-1 mt-1">
           {Object.entries(txt).map(([k, v]) => (
-            <span key={k} className="text-[10px] font-mono text-muted-foreground">
+            <span
+              key={k}
+              className="text-[10px] font-mono text-muted-foreground"
+            >
               {k}={v}
             </span>
           ))}
@@ -544,6 +775,13 @@ export function LogTab({ apiBase }: LogTabProps) {
   const [commChannel, setCommChannel] = React.useState<string>("all");
   const [commKind, setCommKind] = React.useState<string>("all");
   const [commSearch, setCommSearch] = React.useState<string>("");
+  const [transcriptCategory, setTranscriptCategory] =
+    React.useState<string>("all");
+  const [transcriptType, setTranscriptType] = React.useState<string>("all");
+  const [transcriptRole, setTranscriptRole] = React.useState<string>("all");
+  const [transcriptContentType, setTranscriptContentType] =
+    React.useState<string>("all");
+  const [transcriptSearch, setTranscriptSearch] = React.useState<string>("");
   const [openclawSubTab, setOpenclawSubTab] = React.useState<string>("live");
 
   React.useEffect(() => {
@@ -572,7 +810,9 @@ export function LogTab({ apiBase }: LogTabProps) {
             return next.slice(0, 1000);
           });
         }
-      } catch (e) {}
+      } catch (e) {
+        console.error(e);
+      }
     });
 
     return () => {
@@ -680,12 +920,129 @@ export function LogTab({ apiBase }: LogTabProps) {
 
   // Split comm logs by channel category
   const liveCommLogs = React.useMemo(
-    () => filteredCommLogs.filter((l) => ["ws", "event", "req", "res"].includes(l.channel)),
+    () =>
+      filteredCommLogs.filter((l) =>
+        ["ws", "event", "req", "res"].includes(l.channel),
+      ),
     [filteredCommLogs],
   );
   const transcriptLogs = React.useMemo(
     () => commLogs.filter((l) => l.channel === "transcript"),
     [commLogs],
+  );
+  const transcriptTypeOptions = React.useMemo(
+    () =>
+      Array.from(
+        new Set(
+          transcriptLogs.map((log) => {
+            const payload = asRecord(log.payload);
+            return payload ? getTranscriptType(payload) : "unknown";
+          }),
+        ),
+      ).sort(),
+    [transcriptLogs],
+  );
+  const transcriptRoleOptions = React.useMemo(
+    () =>
+      Array.from(
+        new Set(
+          transcriptLogs
+            .map((log) => {
+              const payload = asRecord(log.payload);
+              return payload ? getTranscriptRole(payload) : null;
+            })
+            .filter((role): role is string => role !== null),
+        ),
+      ).sort(),
+    [transcriptLogs],
+  );
+  const transcriptContentTypeOptions = React.useMemo(
+    () =>
+      Array.from(
+        new Set(
+          transcriptLogs.flatMap((log) => {
+            const payload = asRecord(log.payload);
+            return payload ? getTranscriptContentTypes(payload) : [];
+          }),
+        ),
+      ).sort(),
+    [transcriptLogs],
+  );
+  const filteredTranscriptLogs = React.useMemo(
+    () =>
+      transcriptLogs.filter((log) => {
+        const payload = asRecord(log.payload);
+        const topType = payload ? getTranscriptType(payload) : "unknown";
+        const role = payload ? getTranscriptRole(payload) : null;
+        const contentTypes = payload ? getTranscriptContentTypes(payload) : [];
+
+        if (
+          transcriptCategory === "skill" &&
+          extractSkillTranscriptLog(log) === null
+        ) {
+          return false;
+        }
+        if (transcriptCategory === "tool" && !isToolTranscriptLog(log)) {
+          return false;
+        }
+        if (transcriptType !== "all" && topType !== transcriptType) {
+          return false;
+        }
+        if (transcriptRole !== "all" && role !== transcriptRole) {
+          return false;
+        }
+        if (
+          transcriptContentType !== "all" &&
+          !contentTypes.includes(transcriptContentType)
+        ) {
+          return false;
+        }
+        if (transcriptSearch) {
+          const hay = JSON.stringify(log).toLowerCase();
+          if (!hay.includes(transcriptSearch.toLowerCase())) return false;
+        }
+        return true;
+      }),
+    [
+      transcriptCategory,
+      transcriptContentType,
+      transcriptLogs,
+      transcriptRole,
+      transcriptSearch,
+      transcriptType,
+    ],
+  );
+  const skillDescriptionByToolCallId = React.useMemo(() => {
+    const descriptions = new Map<string, string>();
+
+    transcriptLogs.forEach((log) => {
+      const payload = asRecord(log.payload);
+      if (!payload || getTranscriptRole(payload) !== "toolResult") return;
+
+      const message = getTranscriptMessage(payload);
+      const toolCallId =
+        typeof message.toolCallId === "string" ? message.toolCallId : null;
+      if (!toolCallId) return;
+
+      for (const text of getTranscriptTextItems(payload)) {
+        const description = extractSkillDescription(text);
+        if (description) {
+          descriptions.set(toolCallId, description);
+          break;
+        }
+      }
+    });
+
+    return descriptions;
+  }, [transcriptLogs]);
+  const skillLogs = React.useMemo(
+    () =>
+      transcriptLogs
+        .map((log) =>
+          extractSkillTranscriptLog(log, skillDescriptionByToolCallId),
+        )
+        .filter((entry): entry is SkillTranscriptLog => entry !== null),
+    [skillDescriptionByToolCallId, transcriptLogs],
   );
   // Workspace: deduplicate by file name, keep latest
   const workspaceLogs = React.useMemo(() => {
@@ -796,7 +1153,10 @@ export function LogTab({ apiBase }: LogTabProps) {
             )}
 
             <div className="flex flex-wrap gap-2 mt-3">
-              <Select value={filterDirection} onValueChange={setFilterDirection}>
+              <Select
+                value={filterDirection}
+                onValueChange={setFilterDirection}
+              >
                 <SelectTrigger className="w-[120px] h-8 text-xs">
                   <SelectValue placeholder="Direction" />
                 </SelectTrigger>
@@ -837,7 +1197,9 @@ export function LogTab({ apiBase }: LogTabProps) {
                   <div className="text-center text-muted-foreground py-8">
                     <Server className="h-12 w-12 mx-auto mb-2 opacity-30" />
                     <p>No HTTP logs yet</p>
-                    <p className="text-xs">Logs will appear here in real-time</p>
+                    <p className="text-xs">
+                      Logs will appear here in real-time
+                    </p>
                   </div>
                 ) : (
                   filteredLogs.map((log) => {
@@ -884,32 +1246,69 @@ export function LogTab({ apiBase }: LogTabProps) {
           </CardHeader>
 
           <CardContent className="flex-1 overflow-hidden p-0 flex flex-col">
-            <Tabs value={openclawSubTab} onValueChange={setOpenclawSubTab} className="flex flex-col flex-1 overflow-hidden">
-              <TabsList className="mx-4 grid grid-cols-4 bg-muted/40 shrink-0">
+            <Tabs
+              value={openclawSubTab}
+              onValueChange={setOpenclawSubTab}
+              className="flex flex-col flex-1 overflow-hidden"
+            >
+              <TabsList className="mx-4 grid grid-cols-5 bg-muted/40 shrink-0">
                 <TabsTrigger value="live" className="text-xs gap-1">
                   <Wifi className="h-3 w-3" />
                   Live
-                  <Badge variant="secondary" className="text-[10px] px-1 py-0 ml-0.5">{liveCommLogs.length}</Badge>
+                  <Badge
+                    variant="secondary"
+                    className="text-[10px] px-1 py-0 ml-0.5"
+                  >
+                    {liveCommLogs.length}
+                  </Badge>
                 </TabsTrigger>
                 <TabsTrigger value="transcripts" className="text-xs gap-1">
                   <Bot className="h-3 w-3" />
                   Transcripts
-                  <Badge variant="secondary" className="text-[10px] px-1 py-0 ml-0.5">{transcriptLogs.length}</Badge>
+                  <Badge
+                    variant="secondary"
+                    className="text-[10px] px-1 py-0 ml-0.5"
+                  >
+                    {filteredTranscriptLogs.length}
+                  </Badge>
+                </TabsTrigger>
+                <TabsTrigger value="skills" className="text-xs gap-1">
+                  <FileText className="h-3 w-3" />
+                  Skills
+                  <Badge
+                    variant="secondary"
+                    className="text-[10px] px-1 py-0 ml-0.5"
+                  >
+                    {skillLogs.length}
+                  </Badge>
                 </TabsTrigger>
                 <TabsTrigger value="workspace" className="text-xs gap-1">
                   <FolderOpen className="h-3 w-3" />
                   Workspace
-                  <Badge variant="secondary" className="text-[10px] px-1 py-0 ml-0.5">{workspaceLogs.length}</Badge>
+                  <Badge
+                    variant="secondary"
+                    className="text-[10px] px-1 py-0 ml-0.5"
+                  >
+                    {workspaceLogs.length}
+                  </Badge>
                 </TabsTrigger>
                 <TabsTrigger value="discovery" className="text-xs gap-1">
                   <Radio className="h-3 w-3" />
                   Discovery
-                  <Badge variant="secondary" className="text-[10px] px-1 py-0 ml-0.5">{discoveryLogs.length}</Badge>
+                  <Badge
+                    variant="secondary"
+                    className="text-[10px] px-1 py-0 ml-0.5"
+                  >
+                    {discoveryLogs.length}
+                  </Badge>
                 </TabsTrigger>
               </TabsList>
 
               {/* ── Live WS/Event/Req/Res ── */}
-              <TabsContent value="live" className="flex-1 overflow-hidden mt-0 px-4 pt-3">
+              <TabsContent
+                value="live"
+                className="flex-1 overflow-hidden mt-0 px-4 pt-3"
+              >
                 <div className="flex flex-wrap gap-2 mb-3">
                   <Select value={commChannel} onValueChange={setCommChannel}>
                     <SelectTrigger className="w-[110px] h-7 text-xs">
@@ -949,15 +1348,28 @@ export function LogTab({ apiBase }: LogTabProps) {
                       <div className="text-center text-muted-foreground py-12">
                         <WifiOff className="h-10 w-10 mx-auto mb-2 opacity-30" />
                         <p className="text-sm">No live comm events</p>
-                        <p className="text-xs mt-1">Requires OPENCLAW_GATEWAY_URL to be configured</p>
+                        <p className="text-xs mt-1">
+                          Requires OPENCLAW_GATEWAY_URL to be configured
+                        </p>
                       </div>
                     ) : (
                       liveCommLogs.map((log) => {
                         const isExpanded = expandedCommIds.includes(log.id);
                         return (
-                          <Collapsible key={log.id} open={isExpanded} onOpenChange={(open) => setCommExpanded(log.id, open)}>
+                          <Collapsible
+                            key={log.id}
+                            open={isExpanded}
+                            onOpenChange={(open) =>
+                              setCommExpanded(log.id, open)
+                            }
+                          >
                             <CollapsibleTrigger asChild>
-                              <div><CommLogEntryCard log={log} isExpanded={isExpanded} /></div>
+                              <div>
+                                <CommLogEntryCard
+                                  log={log}
+                                  isExpanded={isExpanded}
+                                />
+                              </div>
                             </CollapsibleTrigger>
                             <CollapsibleContent className="mt-1">
                               <div className="rounded-lg border border-border bg-muted/30 p-3">
@@ -965,12 +1377,19 @@ export function LogTab({ apiBase }: LogTabProps) {
                                   <div className="bg-red-500/10 border border-red-500/30 rounded-lg p-3 mb-3">
                                     <div className="flex items-center gap-2 text-red-400 mb-1">
                                       <AlertCircle className="h-4 w-4" />
-                                      <span className="text-sm font-medium">Error</span>
+                                      <span className="text-sm font-medium">
+                                        Error
+                                      </span>
                                     </div>
-                                    <code className="text-sm text-red-300">{log.error}</code>
+                                    <code className="text-sm text-red-300">
+                                      {log.error}
+                                    </code>
                                   </div>
                                 )}
-                                <JsonViewer data={log.payload || {}} title="Payload" />
+                                <JsonViewer
+                                  data={log.payload || {}}
+                                  title="Payload"
+                                />
                               </div>
                             </CollapsibleContent>
                           </Collapsible>
@@ -982,26 +1401,187 @@ export function LogTab({ apiBase }: LogTabProps) {
               </TabsContent>
 
               {/* ── Transcripts ── */}
-              <TabsContent value="transcripts" className="flex-1 overflow-hidden mt-0 px-4 pt-3">
-                <ScrollArea className="h-full">
+              <TabsContent
+                value="transcripts"
+                className="flex flex-col flex-1 overflow-hidden mt-0 px-4 pt-3"
+              >
+                <div className="flex flex-wrap gap-2 mb-3 shrink-0">
+                  <Select
+                    value={transcriptCategory}
+                    onValueChange={setTranscriptCategory}
+                  >
+                    <SelectTrigger className="w-[120px] h-7 text-xs">
+                      <SelectValue placeholder="Category" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All categories</SelectItem>
+                      <SelectItem value="skill">Skill</SelectItem>
+                      <SelectItem value="tool">Tool</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <Select
+                    value={transcriptType}
+                    onValueChange={setTranscriptType}
+                  >
+                    <SelectTrigger className="w-[120px] h-7 text-xs">
+                      <SelectValue placeholder="Type" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All types</SelectItem>
+                      {transcriptTypeOptions.map((option) => (
+                        <SelectItem key={option} value={option}>
+                          {option}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <Select
+                    value={transcriptRole}
+                    onValueChange={setTranscriptRole}
+                  >
+                    <SelectTrigger className="w-[130px] h-7 text-xs">
+                      <SelectValue placeholder="Role" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All roles</SelectItem>
+                      {transcriptRoleOptions.map((option) => (
+                        <SelectItem key={option} value={option}>
+                          {option}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <Select
+                    value={transcriptContentType}
+                    onValueChange={setTranscriptContentType}
+                  >
+                    <SelectTrigger className="w-[130px] h-7 text-xs">
+                      <SelectValue placeholder="Content" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All content</SelectItem>
+                      {transcriptContentTypeOptions.map((option) => (
+                        <SelectItem key={option} value={option}>
+                          {option}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <Input
+                    placeholder="Search transcripts..."
+                    value={transcriptSearch}
+                    onChange={(e) => setTranscriptSearch(e.target.value)}
+                    className="flex-1 h-7 text-xs min-w-[140px]"
+                  />
+                </div>
+                <ScrollArea className="flex-1">
                   <div className="space-y-2 pb-4">
                     {transcriptLogs.length === 0 ? (
                       <div className="text-center text-muted-foreground py-12">
                         <Bot className="h-10 w-10 mx-auto mb-2 opacity-30" />
                         <p className="text-sm">No transcripts found</p>
-                        <p className="text-xs mt-1">~/.openclaw/agents/&lt;id&gt;/sessions/*.jsonl</p>
+                        <p className="text-xs mt-1">
+                          ~/.openclaw/agents/&lt;id&gt;/sessions/*.jsonl
+                        </p>
+                      </div>
+                    ) : filteredTranscriptLogs.length === 0 ? (
+                      <div className="text-center text-muted-foreground py-12">
+                        <Bot className="h-10 w-10 mx-auto mb-2 opacity-30" />
+                        <p className="text-sm">No matching transcripts</p>
+                        <p className="text-xs mt-1">
+                          Try adjusting the transcript filters
+                        </p>
                       </div>
                     ) : (
-                      transcriptLogs.map((log) => {
+                      filteredTranscriptLogs.map((log) => {
                         const isExpanded = expandedCommIds.includes(log.id);
                         return (
-                          <Collapsible key={log.id} open={isExpanded} onOpenChange={(open) => setCommExpanded(log.id, open)}>
+                          <Collapsible
+                            key={log.id}
+                            open={isExpanded}
+                            onOpenChange={(open) =>
+                              setCommExpanded(log.id, open)
+                            }
+                          >
                             <CollapsibleTrigger asChild>
-                              <div><TranscriptEntryCard log={log} isExpanded={isExpanded} /></div>
+                              <div>
+                                <TranscriptEntryCard
+                                  log={log}
+                                  isExpanded={isExpanded}
+                                />
+                              </div>
                             </CollapsibleTrigger>
                             <CollapsibleContent className="mt-1">
                               <div className="rounded-lg border border-border bg-muted/30 p-3">
-                                <JsonViewer data={log.payload || {}} title="Full Entry" />
+                                <JsonViewer
+                                  data={log.payload || {}}
+                                  title="Full Entry"
+                                />
+                              </div>
+                            </CollapsibleContent>
+                          </Collapsible>
+                        );
+                      })
+                    )}
+                  </div>
+                </ScrollArea>
+              </TabsContent>
+
+              {/* ── Skills ── */}
+              <TabsContent
+                value="skills"
+                className="flex-1 overflow-hidden mt-0 px-4 pt-3"
+              >
+                <ScrollArea className="h-full">
+                  <div className="space-y-2 pb-4">
+                    {skillLogs.length === 0 ? (
+                      <div className="text-center text-muted-foreground py-12">
+                        <FileText className="h-10 w-10 mx-auto mb-2 opacity-30" />
+                        <p className="text-sm">
+                          No skill transcript entries found
+                        </p>
+                        <p className="text-xs mt-1">
+                          assistant + toolUse + toolCall.arguments.path includes
+                          SKILL.md
+                        </p>
+                      </div>
+                    ) : (
+                      skillLogs.map((entry) => {
+                        const isExpanded = expandedCommIds.includes(
+                          entry.log.id,
+                        );
+                        return (
+                          <Collapsible
+                            key={entry.log.id}
+                            open={isExpanded}
+                            onOpenChange={(open) =>
+                              setCommExpanded(entry.log.id, open)
+                            }
+                          >
+                            <CollapsibleTrigger asChild>
+                              <div>
+                                <SkillEntryCard
+                                  entry={entry}
+                                  isExpanded={isExpanded}
+                                />
+                              </div>
+                            </CollapsibleTrigger>
+                            <CollapsibleContent className="mt-1">
+                              <div className="rounded-lg border border-border bg-muted/30 p-3">
+                                {entry.description && (
+                                  <div className="mb-3">
+                                    <span className="text-xs text-muted-foreground block mb-1">
+                                      Description
+                                    </span>
+                                    <div className="text-sm text-foreground">
+                                      {entry.description}
+                                    </div>
+                                  </div>
+                                )}
+                                <JsonViewer
+                                  data={entry.log.payload || {}}
+                                  title="Full Entry"
+                                />
                               </div>
                             </CollapsibleContent>
                           </Collapsible>
@@ -1013,30 +1593,51 @@ export function LogTab({ apiBase }: LogTabProps) {
               </TabsContent>
 
               {/* ── Workspace ── */}
-              <TabsContent value="workspace" className="flex-1 overflow-hidden mt-0 px-4 pt-3">
+              <TabsContent
+                value="workspace"
+                className="flex-1 overflow-hidden mt-0 px-4 pt-3"
+              >
                 <ScrollArea className="h-full">
                   <div className="space-y-2 pb-4">
                     {workspaceLogs.length === 0 ? (
                       <div className="text-center text-muted-foreground py-12">
                         <FolderOpen className="h-10 w-10 mx-auto mb-2 opacity-30" />
                         <p className="text-sm">No workspace files found</p>
-                        <p className="text-xs mt-1">~/.openclaw/workspace/*.md</p>
+                        <p className="text-xs mt-1">
+                          ~/.openclaw/workspace/*.md
+                        </p>
                       </div>
                     ) : (
                       workspaceLogs.map((log) => {
                         const isExpanded = expandedCommIds.includes(log.id);
-                        const content = (log.payload?.content as string | undefined) ?? "";
+                        const content =
+                          (log.payload?.content as string | undefined) ?? "";
                         return (
-                          <Collapsible key={log.id} open={isExpanded} onOpenChange={(open) => setCommExpanded(log.id, open)}>
+                          <Collapsible
+                            key={log.id}
+                            open={isExpanded}
+                            onOpenChange={(open) =>
+                              setCommExpanded(log.id, open)
+                            }
+                          >
                             <CollapsibleTrigger asChild>
-                              <div><WorkspaceFileCard log={log} isExpanded={isExpanded} /></div>
+                              <div>
+                                <WorkspaceFileCard
+                                  log={log}
+                                  isExpanded={isExpanded}
+                                />
+                              </div>
                             </CollapsibleTrigger>
                             <CollapsibleContent className="mt-1">
                               <div className="rounded-lg border border-border bg-muted/30 p-3">
                                 {log.error ? (
-                                  <div className="text-sm text-red-400">{log.error}</div>
+                                  <div className="text-sm text-red-400">
+                                    {log.error}
+                                  </div>
                                 ) : (
-                                  <pre className="text-xs font-mono whitespace-pre-wrap break-words max-h-96 overflow-y-auto">{content}</pre>
+                                  <pre className="text-xs font-mono whitespace-pre-wrap break-words max-h-96 overflow-y-auto">
+                                    {content}
+                                  </pre>
                                 )}
                               </div>
                             </CollapsibleContent>
@@ -1049,7 +1650,10 @@ export function LogTab({ apiBase }: LogTabProps) {
               </TabsContent>
 
               {/* ── Discovery ── */}
-              <TabsContent value="discovery" className="flex-1 overflow-hidden mt-0 px-4 pt-3">
+              <TabsContent
+                value="discovery"
+                className="flex-1 overflow-hidden mt-0 px-4 pt-3"
+              >
                 <ScrollArea className="h-full">
                   <div className="space-y-2 pb-4">
                     {discoveryLogs.length === 0 ? (
@@ -1062,13 +1666,27 @@ export function LogTab({ apiBase }: LogTabProps) {
                       discoveryLogs.map((log) => {
                         const isExpanded = expandedCommIds.includes(log.id);
                         return (
-                          <Collapsible key={log.id} open={isExpanded} onOpenChange={(open) => setCommExpanded(log.id, open)}>
+                          <Collapsible
+                            key={log.id}
+                            open={isExpanded}
+                            onOpenChange={(open) =>
+                              setCommExpanded(log.id, open)
+                            }
+                          >
                             <CollapsibleTrigger asChild>
-                              <div><DiscoveryServiceCard log={log} isExpanded={isExpanded} /></div>
+                              <div>
+                                <DiscoveryServiceCard
+                                  log={log}
+                                  isExpanded={isExpanded}
+                                />
+                              </div>
                             </CollapsibleTrigger>
                             <CollapsibleContent className="mt-1">
                               <div className="rounded-lg border border-border bg-muted/30 p-3">
-                                <JsonViewer data={log.payload || {}} title="Service Info" />
+                                <JsonViewer
+                                  data={log.payload || {}}
+                                  title="Service Info"
+                                />
                               </div>
                             </CollapsibleContent>
                           </Collapsible>
