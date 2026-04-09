@@ -33,6 +33,7 @@ import {
   Wifi,
   WifiOff,
   Bot,
+  CornerDownRight,
 } from "lucide-react";
 import {
   Collapsible,
@@ -106,6 +107,36 @@ type SkillTranscriptLog = {
   description?: string | null;
 };
 
+type TranscriptFlowLog = {
+  log: CommLog;
+  nodeId: string;
+  parentId: string | null;
+  sessionId: string;
+  agentId: string;
+  role: string | null;
+  transcriptType: string;
+  contentTypes: string[];
+  preview: string;
+};
+
+type TranscriptFlowNode = {
+  entry: TranscriptFlowLog;
+  children: TranscriptFlowNode[];
+};
+
+type TranscriptFlowGroup = {
+  key: string;
+  sessionId: string;
+  agentId: string;
+  roots: TranscriptFlowNode[];
+  entries: TranscriptFlowLog[];
+  linkedCount: number;
+  title: string;
+  startedAt: number;
+  endedAt: number;
+  mode: "tree" | "timeline";
+};
+
 interface LogTabProps {
   apiBase: string;
 }
@@ -143,6 +174,10 @@ function formatDuration(ms: number | null): string {
   if (ms === null) return "-";
   if (ms < 1000) return `${Math.round(ms)}ms`;
   return `${(ms / 1000).toFixed(2)}s`;
+}
+
+function formatDurationMs(ms: number): string {
+  return `${ms.toFixed(2)}ms`;
 }
 
 function formatTime(timestamp: number): string {
@@ -214,6 +249,61 @@ function getTranscriptTextItems(payload: Record<string, unknown>): string[] {
   return getTranscriptContentItems(payload)
     .map((item) => (typeof item.text === "string" ? item.text : null))
     .filter((text): text is string => text !== null);
+}
+
+function getFirstString(
+  records: Array<Record<string, unknown> | null>,
+  keys: string[],
+): string | null {
+  for (const record of records) {
+    if (!record) continue;
+    for (const key of keys) {
+      const value = record[key];
+      if (typeof value === "string" && value) return value;
+    }
+  }
+  return null;
+}
+
+function getTranscriptNodeId(payload: Record<string, unknown>): string | null {
+  const message = getTranscriptMessage(payload);
+  return getFirstString([message, payload], ["id", "messageId", "entryId"]);
+}
+
+function getTranscriptParentId(
+  payload: Record<string, unknown>,
+): string | null {
+  const message = getTranscriptMessage(payload);
+  return getFirstString(
+    [message, payload],
+    ["parentId", "parent_id", "parentMessageId", "parent"],
+  );
+}
+
+function getTranscriptPreview(payload: Record<string, unknown>): string {
+  const textItems = getTranscriptTextItems(payload);
+  if (textItems.length > 0) {
+    return textItems.join(" ").trim();
+  }
+
+  const message = getTranscriptMessage(payload);
+  const candidates = [
+    message.content,
+    payload.content,
+    message.text,
+    payload.text,
+  ];
+  for (const candidate of candidates) {
+    if (typeof candidate === "string" && candidate.trim()) {
+      return candidate.trim();
+    }
+  }
+
+  try {
+    return JSON.stringify(message.content ?? payload.content ?? payload);
+  } catch {
+    return String(message.content ?? payload.content ?? payload);
+  }
 }
 
 function extractSkillDescription(text: string): string | null {
@@ -295,6 +385,145 @@ function extractSkillTranscriptLog(
   return null;
 }
 
+function extractTranscriptFlowLog(log: CommLog): TranscriptFlowLog | null {
+  const payload = asRecord(log.payload);
+  if (!payload) return null;
+
+  const agentId =
+    (typeof payload._agent_id === "string" && payload._agent_id) ||
+    log.source.split(":").pop() ||
+    "";
+  const sessionId =
+    (typeof payload._session_id === "string" && payload._session_id) ||
+    log.event ||
+    "";
+
+  return {
+    log,
+    nodeId: getTranscriptNodeId(payload) ?? log.id,
+    parentId: getTranscriptParentId(payload),
+    sessionId,
+    agentId,
+    role: getTranscriptRole(payload),
+    transcriptType: getTranscriptType(payload),
+    contentTypes: getTranscriptContentTypes(payload),
+    preview: getTranscriptPreview(payload),
+  };
+}
+
+function summarizeTranscriptPreview(
+  text: string,
+  maxLength: number = 72,
+): string {
+  const normalized = text.replace(/\s+/g, " ").trim();
+  if (!normalized) return "(empty)";
+  return normalized.length > maxLength
+    ? `${normalized.slice(0, maxLength - 1)}…`
+    : normalized;
+}
+
+function getTranscriptTraceTitle(entries: TranscriptFlowLog[]): string {
+  const primary =
+    entries.find((entry) => entry.role === "user" && entry.preview.trim()) ??
+    entries.find((entry) => entry.preview.trim()) ??
+    entries[0];
+  return primary
+    ? summarizeTranscriptPreview(primary.preview)
+    : "Untitled trace";
+}
+
+function isToolLikeFlowEntry(entry: TranscriptFlowLog): boolean {
+  return (
+    entry.role === "tool" ||
+    entry.role === "toolResult" ||
+    entry.contentTypes.includes("toolCall") ||
+    entry.contentTypes.includes("toolResult")
+  );
+}
+
+function buildFlowDepthMap(entries: TranscriptFlowLog[]): Map<string, number> {
+  const byNodeId = new Map(entries.map((entry) => [entry.nodeId, entry]));
+  const depthMap = new Map<string, number>();
+
+  const visit = (entry: TranscriptFlowLog, seen: Set<string>): number => {
+    const cached = depthMap.get(entry.nodeId);
+    if (cached !== undefined) return cached;
+    if (seen.has(entry.nodeId)) return 1;
+
+    let depth = 1;
+    if (entry.role === "user") {
+      depth = 0;
+    } else if (entry.role === "assistant") {
+      depth = 1;
+    } else if (isToolLikeFlowEntry(entry)) {
+      const nextSeen = new Set(seen);
+      nextSeen.add(entry.nodeId);
+      const parent = entry.parentId ? byNodeId.get(entry.parentId) : null;
+      depth = parent ? visit(parent, nextSeen) + 1 : 2;
+    }
+
+    depthMap.set(entry.nodeId, depth);
+    return depth;
+  };
+
+  entries.forEach((entry) => {
+    visit(entry, new Set());
+  });
+
+  return depthMap;
+}
+
+function getFlowEntryLabel(
+  entry: TranscriptFlowLog,
+  skillEntry?: SkillTranscriptLog,
+): string {
+  if (entry.role === "user") return "user";
+  if (skillEntry) return `skill ${skillEntry.skillName}`;
+  if (entry.role === "assistant") return "assistant";
+  if (entry.role === "tool") return "tool call";
+  if (entry.role === "toolResult") return "tool result";
+  if (entry.contentTypes.includes("toolCall")) return "tool call";
+  if (entry.contentTypes.includes("toolResult")) return "tool result";
+  return entry.transcriptType;
+}
+
+function buildTranscriptFlowRoots(entries: TranscriptFlowLog[]): {
+  roots: TranscriptFlowNode[];
+  linkedCount: number;
+} {
+  const nodeMap = new Map<string, TranscriptFlowNode>();
+  entries.forEach((entry) => {
+    nodeMap.set(entry.nodeId, { entry, children: [] });
+  });
+
+  const roots: TranscriptFlowNode[] = [];
+  let linkedCount = 0;
+
+  entries.forEach((entry) => {
+    const node = nodeMap.get(entry.nodeId);
+    if (!node) return;
+
+    if (entry.parentId && entry.parentId !== entry.nodeId) {
+      const parent = nodeMap.get(entry.parentId);
+      if (parent) {
+        parent.children.push(node);
+        linkedCount += 1;
+        return;
+      }
+    }
+
+    roots.push(node);
+  });
+
+  const sortNodes = (nodes: TranscriptFlowNode[]) => {
+    nodes.sort((a, b) => a.entry.log.timestamp - b.entry.log.timestamp);
+    nodes.forEach((node) => sortNodes(node.children));
+  };
+
+  sortNodes(roots);
+  return { roots, linkedCount };
+}
+
 function JsonViewer({ data, title }: { data: unknown; title: string }) {
   const [isOpen, setIsOpen] = React.useState(false);
   const [copied, setCopied] = React.useState(false);
@@ -318,7 +547,7 @@ function JsonViewer({ data, title }: { data: unknown; title: string }) {
   }
 
   return (
-    <Collapsible open={isOpen} onOpenChange={setIsOpen}>
+    <Collapsible open={isOpen} onOpenChange={setIsOpen} className="min-w-0">
       <CollapsibleTrigger className="flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground transition-colors">
         {isOpen ? (
           <ChevronDown className="h-4 w-4" />
@@ -327,8 +556,8 @@ function JsonViewer({ data, title }: { data: unknown; title: string }) {
         )}
         {title}
       </CollapsibleTrigger>
-      <CollapsibleContent className="mt-2">
-        <div className="relative max-w-full overflow-hidden">
+      <CollapsibleContent className="mt-2 min-w-0">
+        <div className="relative w-full min-w-0 max-w-full overflow-hidden">
           <Button
             variant="ghost"
             size="sm"
@@ -338,7 +567,7 @@ function JsonViewer({ data, title }: { data: unknown; title: string }) {
             <Copy className="h-3 w-3 mr-1" />
             {copied ? "Copied" : "Copy"}
           </Button>
-          <pre className="bg-muted/50 p-3 rounded-md text-xs max-h-48 font-mono overflow-auto w-full max-w-full">
+          <pre className="bg-muted/50 p-3 pr-14 rounded-md text-xs max-h-48 font-mono overflow-auto whitespace-pre-wrap break-all w-full min-w-0 max-w-full">
             {jsonString}
           </pre>
         </div>
@@ -569,9 +798,11 @@ function CommLogEntryCard({
 function TranscriptEntryCard({
   log,
   isExpanded,
+  isSelected,
 }: {
   log: CommLog;
   isExpanded: boolean;
+  isSelected: boolean;
 }) {
   const p = log.payload ?? {};
   const transcriptType = getTranscriptType(p);
@@ -598,7 +829,11 @@ function TranscriptEntryCard({
   return (
     <div
       className={`w-full p-3 border rounded-lg text-left transition-all hover:bg-muted/50 ${
-        isExpanded ? "border-primary bg-muted/30" : "border-border"
+        isSelected
+          ? "border-primary bg-primary/10"
+          : isExpanded
+            ? "border-primary bg-muted/30"
+            : "border-border"
       }`}
     >
       <div className="flex items-center gap-2 mb-1">
@@ -643,14 +878,20 @@ function TranscriptEntryCard({
 function SkillEntryCard({
   entry,
   isExpanded,
+  isSelected,
 }: {
   entry: SkillTranscriptLog;
   isExpanded: boolean;
+  isSelected: boolean;
 }) {
   return (
     <div
       className={`w-full p-3 border rounded-lg text-left transition-all hover:bg-muted/50 ${
-        isExpanded ? "border-primary bg-muted/30" : "border-border"
+        isSelected
+          ? "border-primary bg-primary/10"
+          : isExpanded
+            ? "border-primary bg-muted/30"
+            : "border-border"
       }`}
     >
       <div className="flex items-center gap-2 mb-1">
@@ -671,6 +912,79 @@ function SkillEntryCard({
       <div className="mt-0.5 text-xs text-muted-foreground truncate">
         agent: {entry.agentId} | session: {entry.sessionId}
       </div>
+    </div>
+  );
+}
+
+function FlowEntryRow({
+  entry,
+  depth,
+  selectedLogId,
+  onSelect,
+  skillEntry,
+  durationMs,
+  maxDurationMs,
+}: {
+  entry: TranscriptFlowLog;
+  depth: number;
+  selectedLogId: string | null;
+  onSelect: (logId: string) => void;
+  skillEntry?: SkillTranscriptLog;
+  durationMs: number;
+  maxDurationMs: number;
+}) {
+  const isSelected = selectedLogId === entry.log.id;
+  const roleTone =
+    entry.role === "user"
+      ? "text-blue-300 border-blue-500/20 bg-blue-500/10"
+      : entry.role === "assistant"
+        ? "text-green-300 border-green-500/20 bg-green-500/10"
+        : entry.role === "tool" || entry.role === "toolResult"
+          ? "text-yellow-300 border-yellow-500/20 bg-yellow-500/10"
+          : "text-muted-foreground border-border";
+
+  const barWidth =
+    durationMs > 0 && maxDurationMs > 0
+      ? Math.max(6, Math.round((durationMs / maxDurationMs) * 140))
+      : 0;
+
+  return (
+    <div style={{ paddingLeft: depth * 16 }}>
+      <button
+        type="button"
+        onClick={() => onSelect(entry.log.id)}
+        className={`grid w-full min-w-0 grid-cols-[20px_76px_minmax(0,1fr)_minmax(72px,120px)_52px] items-center gap-2 rounded-md border px-2 py-1.5 text-left transition-colors hover:bg-muted/50 ${
+          isSelected
+            ? "border-primary bg-primary/10"
+            : "border-border bg-background/40"
+        }`}
+      >
+        <span className="flex w-5 justify-center text-muted-foreground">
+          {depth > 0 ? <CornerDownRight className="h-3.5 w-3.5" /> : null}
+        </span>
+        {entry.role ? (
+          <Badge
+            variant="outline"
+            className={`w-[76px] justify-center text-[10px] px-1.5 py-0 ${roleTone}`}
+          >
+            {entry.role}
+          </Badge>
+        ) : (
+          <span />
+        )}
+        <span className="min-w-0 truncate text-sm text-foreground">
+          {getFlowEntryLabel(entry, skillEntry)}
+        </span>
+        <div className="flex h-5 min-w-0 items-center rounded bg-primary/10 px-1">
+          <div
+            className="h-3 rounded bg-primary/60"
+            style={{ width: `${barWidth}px` }}
+          />
+        </div>
+        <span className="w-[52px] text-right text-[11px] text-muted-foreground font-mono">
+          {formatDurationMs(durationMs)}
+        </span>
+      </button>
     </div>
   );
 }
@@ -767,6 +1081,12 @@ export function LogTab({ apiBase }: LogTabProps) {
 
   const [commLogs, setCommLogs] = React.useState<CommLog[]>([]);
   const [expandedCommIds, setExpandedCommIds] = React.useState<string[]>([]);
+  const [selectedCommLogId, setSelectedCommLogId] = React.useState<
+    string | null
+  >(null);
+  const [expandedFlowTraceKeys, setExpandedFlowTraceKeys] = React.useState<
+    string[]
+  >([]);
 
   const [filterDirection, setFilterDirection] = React.useState<string>("all");
   const [filterMethod, setFilterMethod] = React.useState<string>("all");
@@ -879,6 +1199,8 @@ export function LogTab({ apiBase }: LogTabProps) {
     try {
       await fetch(`${apiBase}/api/comm-logs`, { method: "DELETE" });
       setCommLogs([]);
+      setSelectedCommLogId(null);
+      setExpandedFlowTraceKeys([]);
     } catch {
       // ignore network errors for clear logs
     }
@@ -1044,6 +1366,91 @@ export function LogTab({ apiBase }: LogTabProps) {
         .filter((entry): entry is SkillTranscriptLog => entry !== null),
     [skillDescriptionByToolCallId, transcriptLogs],
   );
+  const skillLogByLogId = React.useMemo(
+    () => new Map(skillLogs.map((entry) => [entry.log.id, entry])),
+    [skillLogs],
+  );
+  const transcriptFlowLogs = React.useMemo(
+    () =>
+      transcriptLogs
+        .map((log) => extractTranscriptFlowLog(log))
+        .filter((entry): entry is TranscriptFlowLog => entry !== null),
+    [transcriptLogs],
+  );
+  const transcriptFlowGroups = React.useMemo<TranscriptFlowGroup[]>(() => {
+    const sessionGroups = new Map<string, TranscriptFlowLog[]>();
+
+    transcriptFlowLogs.forEach((entry) => {
+      const key =
+        entry.sessionId || entry.agentId || entry.log.source || "unknown";
+      const existing = sessionGroups.get(key);
+      if (existing) {
+        existing.push(entry);
+      } else {
+        sessionGroups.set(key, [entry]);
+      }
+    });
+
+    const traces: TranscriptFlowGroup[] = [];
+
+    Array.from(sessionGroups.entries()).forEach(([key, entries]) => {
+      const sortedEntries = [...entries].sort(
+        (a, b) => a.log.timestamp - b.log.timestamp,
+      );
+      let currentTrace: TranscriptFlowLog[] = [];
+      const flushTrace = () => {
+        if (currentTrace.length === 0) return;
+        const traceEntries = [...currentTrace];
+        const { roots, linkedCount } = buildTranscriptFlowRoots(traceEntries);
+        traces.push({
+          key: `${key}:timeline:${traceEntries[0]?.log.id ?? traces.length}`,
+          sessionId: sortedEntries[0]?.sessionId ?? "",
+          agentId: sortedEntries[0]?.agentId ?? "",
+          roots,
+          entries: traceEntries,
+          linkedCount,
+          title: getTranscriptTraceTitle(traceEntries),
+          startedAt: traceEntries[0]?.log.timestamp ?? 0,
+          endedAt: traceEntries[traceEntries.length - 1]?.log.timestamp ?? 0,
+          mode: linkedCount > 0 ? "tree" : "timeline",
+        });
+        currentTrace = [];
+      };
+
+      sortedEntries.forEach((entry, index) => {
+        const startsNewTrace = currentTrace.length > 0 && entry.role === "user";
+        if (startsNewTrace) flushTrace();
+        currentTrace.push(entry);
+
+        if (index === sortedEntries.length - 1) {
+          flushTrace();
+        }
+      });
+    });
+
+    return traces.sort((a, b) => {
+      const aTs = a.entries[a.entries.length - 1]?.log.timestamp ?? 0;
+      const bTs = b.entries[b.entries.length - 1]?.log.timestamp ?? 0;
+      return bTs - aTs;
+    });
+  }, [transcriptFlowLogs]);
+  const selectedFlowLog = React.useMemo(
+    () =>
+      selectedCommLogId
+        ? (transcriptFlowLogs.find(
+            (entry) => entry.log.id === selectedCommLogId,
+          ) ?? null)
+        : null,
+    [selectedCommLogId, transcriptFlowLogs],
+  );
+  const selectedFlowSkillLog = React.useMemo(
+    () =>
+      selectedCommLogId
+        ? (skillLogs.find((entry) => entry.log.id === selectedCommLogId) ??
+          null)
+        : null,
+    [selectedCommLogId, skillLogs],
+  );
   // Workspace: deduplicate by file name, keep latest
   const workspaceLogs = React.useMemo(() => {
     const byName = new Map<string, CommLog>();
@@ -1084,6 +1491,18 @@ export function LogTab({ apiBase }: LogTabProps) {
         : prev.filter((x) => x !== id),
     );
   }, []);
+  const setFlowTraceExpanded = React.useCallback(
+    (key: string, open: boolean) => {
+      setExpandedFlowTraceKeys((prev) =>
+        open
+          ? prev.includes(key)
+            ? prev
+            : [key, ...prev]
+          : prev.filter((x) => x !== key),
+      );
+    },
+    [],
+  );
 
   return (
     <Tabs defaultValue="http" className="w-full">
@@ -1251,7 +1670,7 @@ export function LogTab({ apiBase }: LogTabProps) {
               onValueChange={setOpenclawSubTab}
               className="flex flex-col flex-1 overflow-hidden"
             >
-              <TabsList className="mx-4 grid grid-cols-5 bg-muted/40 shrink-0">
+              <TabsList className="mx-4 grid grid-cols-6 bg-muted/40 shrink-0">
                 <TabsTrigger value="live" className="text-xs gap-1">
                   <Wifi className="h-3 w-3" />
                   Live
@@ -1260,6 +1679,16 @@ export function LogTab({ apiBase }: LogTabProps) {
                     className="text-[10px] px-1 py-0 ml-0.5"
                   >
                     {liveCommLogs.length}
+                  </Badge>
+                </TabsTrigger>
+                <TabsTrigger value="flow" className="text-xs gap-1">
+                  <Clock className="h-3 w-3" />
+                  Flow
+                  <Badge
+                    variant="secondary"
+                    className="text-[10px] px-1 py-0 ml-0.5"
+                  >
+                    {transcriptFlowGroups.length}
                   </Badge>
                 </TabsTrigger>
                 <TabsTrigger value="transcripts" className="text-xs gap-1">
@@ -1400,6 +1829,276 @@ export function LogTab({ apiBase }: LogTabProps) {
                 </ScrollArea>
               </TabsContent>
 
+              {/* ── Flow ── */}
+              <TabsContent
+                value="flow"
+                className="flex-1 overflow-hidden mt-0 px-4 pt-3"
+              >
+                {transcriptFlowGroups.length === 0 ? (
+                  <div className="text-center text-muted-foreground py-12">
+                    <Clock className="h-10 w-10 mx-auto mb-2 opacity-30" />
+                    <p className="text-sm">No transcript flow found</p>
+                    <p className="text-xs mt-1">
+                      Requires transcript entries with session context
+                    </p>
+                  </div>
+                ) : (
+                  <div className="grid h-full gap-3 lg:grid-cols-[minmax(0,1.35fr)_minmax(320px,1fr)]">
+                    <ScrollArea className="h-full min-w-0 rounded-lg border border-border bg-muted/10">
+                      <div className="space-y-3 p-3">
+                        {transcriptFlowGroups.map((group, index) => {
+                          const isSelectedTrace = group.entries.some(
+                            (entry) => entry.log.id === selectedCommLogId,
+                          );
+                          const isOpen =
+                            expandedFlowTraceKeys.includes(group.key) ||
+                            (expandedFlowTraceKeys.length === 0 &&
+                              index === 0) ||
+                            isSelectedTrace;
+                          return (
+                            <Collapsible
+                              key={group.key}
+                              open={isOpen}
+                              onOpenChange={(open) =>
+                                setFlowTraceExpanded(group.key, open)
+                              }
+                            >
+                              <div
+                                className={`rounded-lg border bg-background/40 ${
+                                  isSelectedTrace
+                                    ? "border-primary/50 bg-primary/5"
+                                    : "border-border"
+                                }`}
+                              >
+                                <CollapsibleTrigger asChild>
+                                  <button
+                                    type="button"
+                                    className="w-full p-3 text-left"
+                                  >
+                                    <div className="flex items-center gap-2">
+                                      {isOpen ? (
+                                        <ChevronDown className="h-4 w-4 text-muted-foreground" />
+                                      ) : (
+                                        <ChevronRight className="h-4 w-4 text-muted-foreground" />
+                                      )}
+                                      <span className="min-w-0 flex-1 truncate text-sm font-medium text-foreground">
+                                        {group.title}
+                                      </span>
+                                      <Badge
+                                        variant="outline"
+                                        className="text-[10px] px-1.5 py-0"
+                                      >
+                                        {group.entries.length} entries
+                                      </Badge>
+                                    </div>
+                                    <div className="mt-1 flex flex-wrap items-center gap-2 pl-6 text-[11px] text-muted-foreground">
+                                      <span>
+                                        {group.sessionId
+                                          ? `session ${group.sessionId}`
+                                          : group.agentId
+                                            ? `agent ${group.agentId}`
+                                            : "unknown"}
+                                      </span>
+                                      <span>{formatTime(group.startedAt)}</span>
+                                      <span>{formatTime(group.endedAt)}</span>
+                                      <span>
+                                        {group.mode === "tree"
+                                          ? "parent-linked"
+                                          : "timeline"}
+                                      </span>
+                                    </div>
+                                  </button>
+                                </CollapsibleTrigger>
+                                <CollapsibleContent className="px-3 pb-3">
+                                  <div className="space-y-2 border-t border-border/60 pt-3">
+                                    {(() => {
+                                      const depthMap = buildFlowDepthMap(
+                                        group.entries,
+                                      );
+                                      const maxDurationMs =
+                                        group.entries.reduce(
+                                          (max, entry, index) => {
+                                            const next =
+                                              group.entries[index + 1];
+                                            if (!next) return max;
+                                            const duration = Math.max(
+                                              0,
+                                              (next.log.timestamp -
+                                                entry.log.timestamp) *
+                                                1000,
+                                            );
+                                            return Math.max(max, duration);
+                                          },
+                                          0,
+                                        );
+
+                                      return group.entries.map(
+                                        (entry, index) => {
+                                          const next = group.entries[index + 1];
+                                          const durationMs = next
+                                            ? Math.max(
+                                                0,
+                                                (next.log.timestamp -
+                                                  entry.log.timestamp) *
+                                                  1000,
+                                              )
+                                            : 0;
+                                          return (
+                                            <FlowEntryRow
+                                              key={entry.log.id}
+                                              entry={entry}
+                                              depth={
+                                                depthMap.get(entry.nodeId) ?? 1
+                                              }
+                                              selectedLogId={selectedCommLogId}
+                                              skillEntry={skillLogByLogId.get(
+                                                entry.log.id,
+                                              )}
+                                              durationMs={durationMs}
+                                              maxDurationMs={maxDurationMs}
+                                              onSelect={(logId) => {
+                                                setSelectedCommLogId(logId);
+                                                setCommExpanded(logId, true);
+                                              }}
+                                            />
+                                          );
+                                        },
+                                      );
+                                    })()}
+                                  </div>
+                                </CollapsibleContent>
+                              </div>
+                            </Collapsible>
+                          );
+                        })}
+                      </div>
+                    </ScrollArea>
+
+                    <div className="flex min-h-0 min-w-0 flex-col rounded-lg border border-border bg-muted/10">
+                      <div className="border-b border-border p-3">
+                        <div className="text-sm font-medium text-foreground">
+                          Flow Details
+                        </div>
+                        <div className="text-xs text-muted-foreground mt-1">
+                          Select a node to inspect its transcript payload and
+                          skill context.
+                        </div>
+                      </div>
+                      <ScrollArea className="flex-1 min-w-0">
+                        <div className="min-w-0 space-y-3 p-3">
+                          {selectedFlowLog ? (
+                            <>
+                              <div className="rounded-lg border border-border bg-background/40 p-3">
+                                <div className="flex flex-wrap items-center gap-2 mb-2">
+                                  {selectedFlowLog.role && (
+                                    <Badge
+                                      variant="outline"
+                                      className="text-[10px] px-1.5 py-0"
+                                    >
+                                      {selectedFlowLog.role}
+                                    </Badge>
+                                  )}
+                                  <Badge
+                                    variant="outline"
+                                    className="text-[10px] px-1.5 py-0 font-mono"
+                                  >
+                                    {selectedFlowLog.transcriptType}
+                                  </Badge>
+                                  <span className="text-xs text-muted-foreground ml-auto">
+                                    {formatTime(selectedFlowLog.log.timestamp)}
+                                  </span>
+                                </div>
+                                <div className="text-sm text-foreground break-words">
+                                  {selectedFlowLog.preview}
+                                </div>
+                                <div className="mt-3 space-y-1 text-xs text-muted-foreground font-mono break-all">
+                                  <div>node: {selectedFlowLog.nodeId}</div>
+                                  <div>
+                                    parent:{" "}
+                                    {selectedFlowLog.parentId ?? "(root)"}
+                                  </div>
+                                  <div>
+                                    session:{" "}
+                                    {selectedFlowLog.sessionId || "(unknown)"}
+                                  </div>
+                                  <div>
+                                    agent:{" "}
+                                    {selectedFlowLog.agentId || "(unknown)"}
+                                  </div>
+                                </div>
+                                {selectedFlowSkillLog && (
+                                  <div className="mt-3 rounded-md border border-violet-500/20 bg-violet-500/5 p-2">
+                                    <div className="text-xs text-violet-300 font-medium">
+                                      Skill
+                                    </div>
+                                    <div className="text-sm text-foreground mt-1">
+                                      {selectedFlowSkillLog.skillName}
+                                    </div>
+                                    <div className="text-xs text-muted-foreground font-mono break-all mt-1">
+                                      {selectedFlowSkillLog.skillPath}
+                                    </div>
+                                    {selectedFlowSkillLog.description && (
+                                      <div className="text-xs text-muted-foreground mt-2">
+                                        {selectedFlowSkillLog.description}
+                                      </div>
+                                    )}
+                                  </div>
+                                )}
+                                <div className="mt-3 flex gap-2">
+                                  <Button
+                                    variant="outline"
+                                    size="sm"
+                                    onClick={() => {
+                                      setOpenclawSubTab("transcripts");
+                                      setCommExpanded(
+                                        selectedFlowLog.log.id,
+                                        true,
+                                      );
+                                    }}
+                                  >
+                                    Open in Transcripts
+                                  </Button>
+                                  {selectedFlowSkillLog && (
+                                    <Button
+                                      variant="outline"
+                                      size="sm"
+                                      onClick={() => {
+                                        setOpenclawSubTab("skills");
+                                        setCommExpanded(
+                                          selectedFlowLog.log.id,
+                                          true,
+                                        );
+                                      }}
+                                    >
+                                      Open in Skills
+                                    </Button>
+                                  )}
+                                </div>
+                              </div>
+                              <div className="rounded-lg border border-border bg-background/40 p-3">
+                                <JsonViewer
+                                  data={selectedFlowLog.log.payload || {}}
+                                  title="Full Entry"
+                                />
+                              </div>
+                            </>
+                          ) : (
+                            <div className="text-center text-muted-foreground py-12">
+                              <Clock className="h-10 w-10 mx-auto mb-2 opacity-30" />
+                              <p className="text-sm">Select a flow node</p>
+                              <p className="text-xs mt-1">
+                                The detail pane will show the linked transcript
+                                entry
+                              </p>
+                            </div>
+                          )}
+                        </div>
+                      </ScrollArea>
+                    </div>
+                  </div>
+                )}
+              </TabsContent>
+
               {/* ── Transcripts ── */}
               <TabsContent
                 value="transcripts"
@@ -1495,6 +2194,7 @@ export function LogTab({ apiBase }: LogTabProps) {
                     ) : (
                       filteredTranscriptLogs.map((log) => {
                         const isExpanded = expandedCommIds.includes(log.id);
+                        const isSelected = selectedCommLogId === log.id;
                         return (
                           <Collapsible
                             key={log.id}
@@ -1504,10 +2204,11 @@ export function LogTab({ apiBase }: LogTabProps) {
                             }
                           >
                             <CollapsibleTrigger asChild>
-                              <div>
+                              <div onClick={() => setSelectedCommLogId(log.id)}>
                                 <TranscriptEntryCard
                                   log={log}
                                   isExpanded={isExpanded}
+                                  isSelected={isSelected}
                                 />
                               </div>
                             </CollapsibleTrigger>
@@ -1550,6 +2251,7 @@ export function LogTab({ apiBase }: LogTabProps) {
                         const isExpanded = expandedCommIds.includes(
                           entry.log.id,
                         );
+                        const isSelected = selectedCommLogId === entry.log.id;
                         return (
                           <Collapsible
                             key={entry.log.id}
@@ -1559,10 +2261,15 @@ export function LogTab({ apiBase }: LogTabProps) {
                             }
                           >
                             <CollapsibleTrigger asChild>
-                              <div>
+                              <div
+                                onClick={() =>
+                                  setSelectedCommLogId(entry.log.id)
+                                }
+                              >
                                 <SkillEntryCard
                                   entry={entry}
                                   isExpanded={isExpanded}
+                                  isSelected={isSelected}
                                 />
                               </div>
                             </CollapsibleTrigger>
