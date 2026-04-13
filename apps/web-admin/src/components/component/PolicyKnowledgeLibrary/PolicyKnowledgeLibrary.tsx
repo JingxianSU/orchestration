@@ -95,7 +95,7 @@ export default function PolicyKnowledgeLibrary() {
 
   const [selectedRule, setSelectedRule] = useState<Rule | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
-  const viewMode = "list" as const;
+  const viewMode: "list" | "grid" = "list";
   const [sortBy, setSortBy] = useState<string>("lastModified");
 
   const [newRuleDialogOpen, setNewRuleDialogOpen] = useState(false);

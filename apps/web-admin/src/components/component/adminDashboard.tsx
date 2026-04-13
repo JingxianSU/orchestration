@@ -837,7 +837,7 @@ export function AdminDashboard({
               triggerLiveScroll={triggerLiveScroll}
               autoMode={autoMode}
               onAutoModeChange={onAutoModeChange}
-              logs={httpLogs}
+              logs={httpLogs as any}
             />
           </TabsContent>
 
